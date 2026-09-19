@@ -1,0 +1,66 @@
+# Logs
+logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Frontend build
+node_modules
+dist
+dist-ssr
+*.local
+
+# Editor
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+env/
+venv/
+
+# Environment — NEVER push
+.env
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# User uploads — never push user files
+uploads/
+
+# Vector store — large binary files
+vector_store/
+*.faiss
+*.pkl
+chroma_db/
+
+# Generated cache files
+knowledge_graph.json
+debug_vectorstore*/
+
+# Test and dev files
+test_retrieval.py
+test_generate.py
+
+# Docs (internal only)
+IMPROVEMENT2.docx
+Improvement_Doc.md
+
+# Static CSS (generated)
+static/style.css

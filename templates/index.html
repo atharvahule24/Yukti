@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Study Partner</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+
+<body>
+
+<div class="container">
+
+    <h1>🧠 Study Partner AI</h1>
+
+    <div class="card">
+        <h3>Upload Document</h3>
+        <form method="POST" enctype="multipart/form-data">
+            <input type="file" name="file" accept=".pdf,.txt,.docx,.pptx">
+            <button type="submit">Upload</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3>Load YouTube Transcript</h3>
+        <form method="POST" action="/youtube">
+            <input type="text" name="url" placeholder="Paste YouTube URL here">
+            <button type="submit">Load</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h3>Ask Question</h3>
+        <form method="POST" action="/query">
+            <input type="text" name="query" placeholder="Ask something...">
+            <button type="submit">Search</button>
+        </form>
+    </div>
+
+    {% if message %}
+    <div class="card status-card">
+        <p><strong>Status:</strong> {{ message }}</p>
+    </div>
+    {% endif %}
+
+    {% if answer %}
+    <div class="card">
+        <h3>Answer</h3>
+        <div class="output">
+            {{ answer }}
+        </div>
+    </div>
+    {% endif %}
+
+</div>
+
+</body>
+</html>
