@@ -103,11 +103,25 @@ Question: {question}
 Sample correct answer: {sample_answer}
 Student answer: {user_answer}
 
+IMPORTANT CONCEPT RULE:
+- The question has a fixed list of canonical concepts.
+- Each canonical concept has a stable concept ID such as C1, C2, C3.
+- You MUST classify the student's answer using ONLY these concept IDs.
+- Do NOT create new concept IDs.
+- Do NOT return concept names in correct_concepts or missed_concepts.
+- Return ONLY the IDs provided in the canonical concept list.
+- A concept ID can appear in either correct_concepts or missed_concepts.
+- Every concept ID must come from the provided canonical concept list.
+- If the student's wording differs from the canonical concept wording, select the matching concept ID.
+
+Canonical concepts:
+{canonical_concepts}
+
 Return ONLY valid JSON:
 {{
   "score": 10,
   "feedback": "Specific, evidence-based feedback in 1-2 sentences",
   "correct_concepts": ["list of concepts the student got right"],
-  "missed_concepts": ["list of concepts the student missed or got wrong"],
+"missed_concepts": ["list of concepts the student missed or got wrong"],
   "study_tip": "One specific thing the student should review next"
 }}"""

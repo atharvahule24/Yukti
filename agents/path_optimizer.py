@@ -19,7 +19,7 @@ def optimize_learning_path(session_id: str) -> dict:
 
     weakest = states[0]
     concept = weakest["concept"]
-    mastery = weakest["mastery_score"]
+    mastery = weakest["mastery"]
 
     if mastery < 40:
         action = "review"

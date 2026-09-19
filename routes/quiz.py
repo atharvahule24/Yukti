@@ -12,6 +12,7 @@ from utils.validation import (
 )
 from db import record_quiz_score, update_learner_state
 from agents.path_optimizer import optimize_learning_path
+from agents.concept_registry import get_canonical_concepts
 
 quiz_bp = Blueprint('quiz', __name__)
 
@@ -81,25 +82,39 @@ def generate_quiz(session_id):
         return jsonify(quiz)
     except Exception as e:
         return jsonify({"error": "generation_failed", "message": str(e)}), 500
-
+    
 @quiz_bp.route('/quiz/grade', methods=['POST'])
 def grade_answer():
     data, parse_error = parse_json_request(request)
     if parse_error:
         return json_error(parse_error)
+
     question = data.get("question", "")
     user_answer = data.get("user_answer", "")
     sample_answer = data.get("sample_answer", "")
     concept = data.get("concept", question)
     session_id = data.get("session_id", "")
+    canonical_concepts = get_canonical_concepts(concept)
+    concept_id_map = {
+    f"C{i + 1}": item
+    for i, item in enumerate(canonical_concepts)
+}
+
+    canonical_concepts_for_prompt = "\n".join(
+    f"{concept_id}: {concept_name}"
+    for concept_id, concept_name in concept_id_map.items()
+)
+    session_id = data.get("session_id", "")
+
     if session_id:
         valid, error = validate_session_id(session_id)
         if not valid:
             return json_error(error)
-    # Deterministic check for exact answers
+
     normalized_user = user_answer.strip().lower()
     normalized_sample = sample_answer.strip().lower()
 
+    # 1. Deterministic check for exact answers
     if normalized_user and normalized_user == normalized_sample:
         grading = {
             "score": 10,
@@ -111,55 +126,109 @@ def grade_answer():
 
         if session_id:
             record_quiz_score(session_id, grading["score"])
+
             update_learner_state(
-                session_id=session_id,
-                correct_concepts=grading["correct_concepts"],
-                missed_concepts=[],
-                score=grading["score"],
+                session_id,
+                grading.get("correct_concepts", []),
+                grading.get("missed_concepts", []),
+                grading["score"]
             )
 
+            grading["learning_path"] = optimize_learning_path(session_id)
+
         return jsonify(grading)
+
+    # 2. AI grading for non-exact answers
     generator = Generator(json_mode=True)
+
     try:
         res = generator.chain.invoke({
-            "context": f"Question: {question}\nConcept: {concept}\nSample Answer: {sample_answer}",
+            "context": (
+                f"Question: {question}\n"
+                f"Concept: {concept}\n"
+                f"Sample Answer: {sample_answer}"
+            ),
+            
             "question": GRADING_PROMPT.format(
                 question=question,
                 sample_answer=sample_answer,
-                user_answer=user_answer
+                user_answer=user_answer,
+                canonical_concepts=canonical_concepts_for_prompt
             )
         })
 
         grading = extract_json(res)
+        correct_ids = grading.get("correct_concepts", [])
+        missed_ids = grading.get("missed_concepts", [])
+
+        grading["correct_concepts"] = [
+            concept_id_map[concept_id]
+            for concept_id in correct_ids
+            if concept_id in concept_id_map
+        ]
+
+        grading["missed_concepts"] = [
+            concept_id_map[concept_id]
+            for concept_id in missed_ids
+            if concept_id in concept_id_map
+        ]
+
         print("RAW GRADING RESPONSE:", repr(res))
 
         if grading:
-            if session_id and "score" in grading:
-                record_quiz_score(session_id, grading["score"])
+            score = float(grading.get("score", 0) or 0)
 
-                update_learner_state(
-                    session_id=session_id,
-                    correct_concepts=[concept] if grading["score"] >= 7 else [],
-                    missed_concepts=[concept] if grading["score"] < 7 else [],
-                    score=grading["score"],
+            if session_id:
+                record_quiz_score(
+                    session_id,
+                    score
                 )
 
-                next_action = optimize_learning_path(session_id)
-                grading["next_action"] = next_action
+                correct_concepts = list(
+                    grading.get("correct_concepts", [])
+                )
+
+                missed_concepts = list(
+                    grading.get("missed_concepts", [])
+                )
+
+                # Keep the main question concept connected
+                # to the learner state.
+                if concept not in correct_concepts and concept not in missed_concepts:
+                    if score >= 7:
+                        correct_concepts.append(concept)
+                    else:
+                        missed_concepts.append(concept)
+
+                update_learner_state(
+                    session_id,
+                    correct_concepts,
+                    missed_concepts,
+                    score
+                )
+
+                grading["learning_path"] = optimize_learning_path(
+                    session_id
+                )
 
             return jsonify(grading)
 
     except Exception as e:
         print("QUIZ GRADING ERROR:", repr(e))
-        
-    # Fallback
+
+    # 3. Fallback if AI grading fails
     fallback = {
-        "score": 5, 
-        "feedback": "Unable to grade automatically. Please compare with sample answer.", 
-        "correct_concepts": [], 
+        "score": 5,
+        "feedback": "Unable to grade automatically. Please compare with sample answer.",
+        "correct_concepts": [],
         "missed_concepts": [],
         "study_tip": "Review the sample answer and compare it against your response."
     }
+
     if session_id:
-        record_quiz_score(session_id, fallback["score"])
+        record_quiz_score(
+            session_id,
+            fallback["score"]
+        )
+
     return jsonify(fallback)

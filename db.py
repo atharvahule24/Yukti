@@ -51,6 +51,27 @@ def init_db():
             )
             """
         )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS learner_state (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                concept TEXT NOT NULL,
+                mastery REAL DEFAULT 0.0,
+                confidence REAL DEFAULT 0.5,
+                attempts INTEGER DEFAULT 0,
+                correct_attempts INTEGER DEFAULT 0,
+                recent_score REAL DEFAULT 0.0,
+                needs_examples INTEGER DEFAULT 0,
+                needs_step_by_step INTEGER DEFAULT 0,
+                updated_at TEXT NOT NULL,
+                UNIQUE(session_id, concept),
+                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+            )
+            """
+        )
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS card_schedule (
@@ -61,22 +82,6 @@ def init_db():
                 interval INTEGER DEFAULT 1,
                 repetitions INTEGER DEFAULT 0,
                 next_review TEXT,
-                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
-            )
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS learner_state (
-                session_id TEXT NOT NULL,
-                concept TEXT NOT NULL,
-                mastery_score REAL DEFAULT 0.0,
-                correct_attempts INTEGER DEFAULT 0,
-                incorrect_attempts INTEGER DEFAULT 0,
-                last_score REAL DEFAULT 0.0,
-                updated_at TEXT,
-                PRIMARY KEY (session_id, concept),
                 FOREIGN KEY (session_id) REFERENCES sessions(session_id)
             )
             """
@@ -217,83 +222,161 @@ def update_learner_state(
 
     with get_conn() as conn:
         for concept in correct_concepts:
-            conn.execute(
-                """
-                INSERT INTO learner_state (
-                    session_id,
-                    concept,
-                    mastery_score,
-                    correct_attempts,
-                    incorrect_attempts,
-                    last_score,
-                    updated_at
-                )
-                VALUES (?, ?, 100.0, 1, 0, ?, ?)
-                ON CONFLICT(session_id, concept) DO UPDATE SET
-                    correct_attempts = correct_attempts + 1,
-                    last_score = excluded.last_score,
-                    updated_at = excluded.updated_at
-                """,
-                (session_id, concept, score, now),
-            )
-
-        for concept in missed_concepts:
-            conn.execute(
-                """
-                INSERT INTO learner_state (
-                    session_id,
-                    concept,
-                    mastery_score,
-                    correct_attempts,
-                    incorrect_attempts,
-                    last_score,
-                    updated_at
-                )
-                VALUES (?, ?, 0.0, 0, 1, ?, ?)
-                ON CONFLICT(session_id, concept) DO UPDATE SET
-                    incorrect_attempts = incorrect_attempts + 1,
-                    last_score = excluded.last_score,
-                    updated_at = excluded.updated_at
-                """,
-                (session_id, concept, score, now),
-            )
-
-        for concept in set(correct_concepts + missed_concepts):
             row = conn.execute(
                 """
-                SELECT correct_attempts, incorrect_attempts
+                SELECT mastery, confidence, attempts, correct_attempts
                 FROM learner_state
                 WHERE session_id=? AND concept=?
                 """,
                 (session_id, concept),
             ).fetchone()
 
-            total_attempts = row["correct_attempts"] + row["incorrect_attempts"]
+            if row:
+                attempts = row["attempts"] + 1
+                correct_attempts = row["correct_attempts"] + 1
 
-            mastery = (
-                row["correct_attempts"] / total_attempts * 100
-                if total_attempts > 0
-                else 0.0
-            )
+                mastery = (
+                    correct_attempts / attempts * 100
+                    if attempts > 0
+                    else 0.0
+                )
 
-            conn.execute(
+                confidence = min(
+                    1.0,
+                    row["confidence"] + 0.1
+                )
+
+                conn.execute(
+                    """
+                    UPDATE learner_state
+                    SET mastery=?,
+                        confidence=?,
+                        attempts=?,
+                        correct_attempts=?,
+                        recent_score=?,
+                        needs_examples=0,
+                        needs_step_by_step=0,
+                        updated_at=?
+                    WHERE session_id=? AND concept=?
+                    """,
+                    (
+                        mastery,
+                        confidence,
+                        attempts,
+                        correct_attempts,
+                        score,
+                        now,
+                        session_id,
+                        concept,
+                    ),
+                )
+
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO learner_state (
+                        session_id,
+                        concept,
+                        mastery,
+                        confidence,
+                        attempts,
+                        correct_attempts,
+                        recent_score,
+                        needs_examples,
+                        needs_step_by_step,
+                        updated_at
+                    )
+                    VALUES (?, ?, 100.0, 0.6, 1, 1, ?, 0, 0, ?)
+                    """,
+                    (session_id, concept, score, now),
+                )
+
+        for concept in missed_concepts:
+            row = conn.execute(
                 """
-                UPDATE learner_state
-                SET mastery_score=?, updated_at=?
+                SELECT mastery, confidence, attempts, correct_attempts
+                FROM learner_state
                 WHERE session_id=? AND concept=?
                 """,
-                (mastery, now, session_id, concept),
-            )
+                (session_id, concept),
+            ).fetchone()
+
+            if row:
+                attempts = row["attempts"] + 1
+                correct_attempts = row["correct_attempts"]
+
+                mastery = (
+                    correct_attempts / attempts * 100
+                    if attempts > 0
+                    else 0.0
+                )
+
+                confidence = max(
+                    0.0,
+                    row["confidence"] - 0.1
+                )
+
+                conn.execute(
+                    """
+                    UPDATE learner_state
+                    SET mastery=?,
+                        confidence=?,
+                        attempts=?,
+                        recent_score=?,
+                        needs_examples=1,
+                        needs_step_by_step=1,
+                        updated_at=?
+                    WHERE session_id=? AND concept=?
+                    """,
+                    (
+                        mastery,
+                        confidence,
+                        attempts,
+                        score,
+                        now,
+                        session_id,
+                        concept,
+                    ),
+                )
+
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO learner_state (
+                        session_id,
+                        concept,
+                        mastery,
+                        confidence,
+                        attempts,
+                        correct_attempts,
+                        recent_score,
+                        needs_examples,
+                        needs_step_by_step,
+                        updated_at
+                    )
+                    VALUES (?, ?, 0.0, 0.4, 1, 0, ?, 1, 1, ?)
+                    """,
+                    (session_id, concept, score, now),
+                )
+
 
 def get_learner_state(session_id: str) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(
             """
-            SELECT concept, mastery_score, correct_attempts,
-                   incorrect_attempts, last_score, updated_at
+            SELECT
+                concept,
+                mastery,
+                confidence,
+                attempts,
+                correct_attempts,
+                recent_score,
+                needs_examples,
+                needs_step_by_step,
+                updated_at
             FROM learner_state
             WHERE session_id=?
-            ORDER BY mastery_score ASC
+            ORDER BY mastery ASC
             """,
             (session_id,),
         ).fetchall()
