@@ -350,10 +350,35 @@ className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--ra
 </div>
 <p className="text-sm text-[var(--text-secondary)] leading-relaxed">{result.feedback}</p>
 {result.study_tip && (
-<div className="mt-3 p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
-<p className="text-xs text-purple-300/80 font-medium mb-1">Study tip</p>
-<p className="text-sm text-white/70">{result.study_tip}</p>
-</div>
+  <div className="mt-3 p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
+    <p className="text-xs text-purple-300/80 font-medium mb-1">Study tip</p>
+    <p className="text-sm text-white/70">{result.study_tip}</p>
+  </div>
+)}
+
+{result.learning_path && (
+  <div className="mt-3 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
+    <p className="text-xs text-blue-300/80 font-medium mb-1">
+      Your Next Learning Step
+    </p>
+
+    <p className="text-sm text-white/90">
+      <span className="font-medium">Action:</span>{' '}
+      {result.learning_path.action.replaceAll('_', ' ')}
+    </p>
+
+    {result.learning_path.concept && (
+      <p className="text-sm text-white/70 mt-1">
+        <span className="font-medium">Concept:</span>{' '}
+        {result.learning_path.concept}
+      </p>
+    )}
+
+    <p className="text-sm text-white/70 mt-1">
+      <span className="font-medium">Why:</span>{' '}
+      {result.learning_path.reason}
+    </p>
+  </div>
 )}
 </div>
 )}

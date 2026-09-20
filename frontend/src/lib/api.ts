@@ -39,12 +39,22 @@ export interface ShortAnswer {
   concept: string;
 }
 
+export interface LearningPath {
+  action: string;
+  reason: string;
+  concept: string | null;
+  mastery?: number;
+  confidence?: number;
+  difficulty: 'easy' | 'medium' | 'hard' | string;
+}
+
 export interface GradeResult {
   score: number;
   feedback: string;
   correct_concepts: string[];
   missed_concepts: string[];
   study_tip?: string;
+  learning_path?: LearningPath;
 }
 
 export interface Session {
