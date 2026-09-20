@@ -12,8 +12,11 @@ from utils.validation import (
 )
 from db import record_quiz_score, update_learner_state
 from agents.path_optimizer import optimize_learning_path
-from agents.concept_registry import get_canonical_concepts
-
+from agents.misconception_detector import detect_misconception
+from agents.concept_registry import (
+    get_canonical_concept,
+    get_canonical_concepts,
+)
 quiz_bp = Blueprint('quiz', __name__)
 
 @quiz_bp.route('/quiz/<session_id>', methods=['GET'])
@@ -86,28 +89,37 @@ def generate_quiz(session_id):
 @quiz_bp.route('/quiz/grade', methods=['POST'])
 def grade_answer():
     data, parse_error = parse_json_request(request)
+
     if parse_error:
         return json_error(parse_error)
 
     question = data.get("question", "")
     user_answer = data.get("user_answer", "")
     sample_answer = data.get("sample_answer", "")
-    concept = data.get("concept", question)
+
+    concept = get_canonical_concept(
+        data.get("concept", question)
+    )
+
     session_id = data.get("session_id", "")
-    canonical_concepts = get_canonical_concepts(concept)
+
+    canonical_concepts = get_canonical_concepts(
+        concept
+    )
+
     concept_id_map = {
-    f"C{i + 1}": item
-    for i, item in enumerate(canonical_concepts)
-}
+        f"C{i + 1}": item
+        for i, item in enumerate(canonical_concepts)
+    }
 
     canonical_concepts_for_prompt = "\n".join(
-    f"{concept_id}: {concept_name}"
-    for concept_id, concept_name in concept_id_map.items()
-)
-    session_id = data.get("session_id", "")
+        f"{concept_id}: {concept_name}"
+        for concept_id, concept_name in concept_id_map.items()
+    )
 
     if session_id:
         valid, error = validate_session_id(session_id)
+
         if not valid:
             return json_error(error)
 
@@ -125,7 +137,10 @@ def grade_answer():
         }
 
         if session_id:
-            record_quiz_score(session_id, grading["score"])
+            record_quiz_score(
+                session_id,
+                grading["score"]
+            )
 
             update_learner_state(
                 session_id,
@@ -134,7 +149,9 @@ def grade_answer():
                 grading["score"]
             )
 
-            grading["learning_path"] = optimize_learning_path(session_id)
+            grading["learning_path"] = optimize_learning_path(
+                session_id,current_concept=concept,
+            )
 
         return jsonify(grading)
 
@@ -148,7 +165,6 @@ def grade_answer():
                 f"Concept: {concept}\n"
                 f"Sample Answer: {sample_answer}"
             ),
-            
             "question": GRADING_PROMPT.format(
                 question=question,
                 sample_answer=sample_answer,
@@ -158,8 +174,16 @@ def grade_answer():
         })
 
         grading = extract_json(res)
-        correct_ids = grading.get("correct_concepts", [])
-        missed_ids = grading.get("missed_concepts", [])
+
+        correct_ids = grading.get(
+            "correct_concepts",
+            []
+        )
+
+        missed_ids = grading.get(
+            "missed_concepts",
+            []
+        )
 
         grading["correct_concepts"] = [
             concept_id_map[concept_id]
@@ -173,11 +197,28 @@ def grade_answer():
             if concept_id in concept_id_map
         ]
 
-        print("RAW GRADING RESPONSE:", repr(res))
+        print(
+            "RAW GRADING RESPONSE:",
+            repr(res)
+        )
 
         if grading:
-            score = float(grading.get("score", 0) or 0)
+            score = float(
+                grading.get("score", 0) or 0
+            )
 
+            # Detect misconception for incorrect answers.
+            # This does not require a session.
+            if score < 7:
+                grading["misconception"] = detect_misconception(
+                    question=question,
+                    student_answer=user_answer,
+                    sample_answer=sample_answer,
+                    concept=concept,
+                )
+
+            # Update persistent learner data only
+            # when a valid session exists.
             if session_id:
                 record_quiz_score(
                     session_id,
@@ -185,44 +226,74 @@ def grade_answer():
                 )
 
                 correct_concepts = list(
-                    grading.get("correct_concepts", [])
+                    grading.get(
+                        "correct_concepts",
+                        []
+                    )
                 )
 
                 missed_concepts = list(
-                    grading.get("missed_concepts", [])
+                    grading.get(
+                        "missed_concepts",
+                        []
+                    )
                 )
 
-                # Keep the main question concept connected
-                # to the learner state.
-                if concept not in correct_concepts and concept not in missed_concepts:
+                if (
+                    concept not in correct_concepts
+                    and concept not in missed_concepts
+                ):
                     if score >= 7:
-                        correct_concepts.append(concept)
+                        correct_concepts.append(
+                            concept
+                        )
                     else:
-                        missed_concepts.append(concept)
+                        missed_concepts.append(
+                            concept
+                        )
+
+                misconception_severity = None
+
+                if grading.get("misconception"):
+                    misconception_severity = grading["misconception"].get(
+                        "severity"
+                    )
 
                 update_learner_state(
                     session_id,
                     correct_concepts,
                     missed_concepts,
-                    score
+                    score,
+                    misconception_severity
                 )
 
-                grading["learning_path"] = optimize_learning_path(
-                    session_id
+                grading["learning_path"] = (
+                    optimize_learning_path(
+                        session_id,current_concept=concept
+                    )
                 )
 
             return jsonify(grading)
 
     except Exception as e:
-        print("QUIZ GRADING ERROR:", repr(e))
+        print(
+            "QUIZ GRADING ERROR:",
+            repr(e)
+        )
 
     # 3. Fallback if AI grading fails
     fallback = {
         "score": 5,
-        "feedback": "Unable to grade automatically. Please compare with sample answer.",
+        "feedback": (
+            "Unable to grade automatically. "
+            "Please compare with sample answer."
+        ),
         "correct_concepts": [],
         "missed_concepts": [],
-        "study_tip": "Review the sample answer and compare it against your response."
+        "study_tip": (
+            "Review the sample answer and compare "
+            "it against your response."
+        )
     }
 
     if session_id:

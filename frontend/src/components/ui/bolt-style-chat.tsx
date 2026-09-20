@@ -53,7 +53,7 @@ const markdownComponents = {
   ),
 
   code: ({ inline, className, children, ...props }: CodeProps) => {
-    const match = /language-(\w+)/.exec(className || '')
+    
 
     if (!inline) {
       return (

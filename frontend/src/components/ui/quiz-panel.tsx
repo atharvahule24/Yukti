@@ -374,6 +374,21 @@ className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--ra
       </p>
     )}
 
+    {result.learning_path.action === 'step_by_step_review' && (
+  <button
+    onClick={() => {
+      const concept = result.learning_path?.concept || 'this concept'
+      const prompt = `Teach me ${concept} step by step. Start from the basics, identify what I may be misunderstanding, and check my understanding after each step.`
+      window.dispatchEvent(
+        new CustomEvent('yukti:ask', { detail: prompt })
+      )
+    }}
+    className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--radius)] text-sm font-medium hover:opacity-90 transition-opacity"
+  >
+    Start Step-by-Step Review
+  </button>
+)}
+
     <p className="text-sm text-white/70 mt-1">
       <span className="font-medium">Why:</span>{' '}
       {result.learning_path.reason}

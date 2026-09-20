@@ -217,6 +217,7 @@ def update_learner_state(
     correct_concepts: list[str],
     missed_concepts: list[str],
     score: float,
+    misconception_severity: str | None = None,
 ):
     now = datetime.utcnow().isoformat()
 
@@ -311,10 +312,28 @@ def update_learner_state(
                     else 0.0
                 )
 
+                confidence_drop = {
+                "low": 0.05,
+                "medium": 0.10,
+                "high": 0.15,
+                }.get(
+                misconception_severity,
+                0.10
+                )
+
+                confidence_drop = {
+                    "low": 0.05,
+                    "medium": 0.10,
+                    "high": 0.15,
+                }.get(
+                    misconception_severity,
+                    0.10
+                )
+
                 confidence = max(
                     0.0,
-                    row["confidence"] - 0.1
-                )
+                    row["confidence"] - confidence_drop
+)
 
                 conn.execute(
                     """
@@ -340,6 +359,15 @@ def update_learner_state(
                 )
 
             else:
+                initial_confidence = {
+                    "low": 0.45,
+                    "medium": 0.40,
+                    "high": 0.35,
+                }.get(
+                    misconception_severity,
+                    0.40
+                )
+
                 conn.execute(
                     """
                     INSERT INTO learner_state (
@@ -354,11 +382,109 @@ def update_learner_state(
                         needs_step_by_step,
                         updated_at
                     )
-                    VALUES (?, ?, 0.0, 0.4, 1, 0, ?, 1, 1, ?)
+                    VALUES (?, ?, 0.0, ?, 1, 0, ?, 1, 1, ?)
                     """,
-                    (session_id, concept, score, now),
+                    (
+                        session_id,
+                        concept,
+                        initial_confidence,
+                        score,
+                        now,
+                    ),
                 )
 
+
+def record_misconception(
+    session_id: str,
+    concept: str,
+    severity: str,
+):
+    """
+    Update learner state when a misconception is detected.
+    """
+
+    now = datetime.utcnow().isoformat()
+
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT
+                mastery,
+                confidence,
+                attempts,
+                correct_attempts
+            FROM learner_state
+            WHERE session_id=? AND concept=?
+            """,
+            (session_id, concept),
+        ).fetchone()
+
+        if row:
+            mastery = max(
+                0.0,
+                row["mastery"] - 10.0
+            )
+
+            confidence_drop = {
+                "low": 0.05,
+                "medium": 0.10,
+                "high": 0.15,
+            }.get(severity, 0.10)
+
+            confidence = max(
+                0.0,
+                row["confidence"] - confidence_drop
+            )
+
+            conn.execute(
+                """
+                UPDATE learner_state
+                SET mastery=?,
+                    confidence=?,
+                    needs_examples=1,
+                    needs_step_by_step=1,
+                    updated_at=?
+                WHERE session_id=? AND concept=?
+                """,
+                (
+                    mastery,
+                    confidence,
+                    now,
+                    session_id,
+                    concept,
+                ),
+            )
+
+        else:
+            confidence = {
+                "low": 0.45,
+                "medium": 0.40,
+                "high": 0.35,
+            }.get(severity, 0.40)
+
+            conn.execute(
+                """
+                INSERT INTO learner_state (
+                    session_id,
+                    concept,
+                    mastery,
+                    confidence,
+                    attempts,
+                    correct_attempts,
+                    recent_score,
+                    needs_examples,
+                    needs_step_by_step,
+                    updated_at
+                )
+                VALUES (?, ?, 0.0, ?, 1, 0, 0.0, 1, 1, ?)
+                """,
+                (
+                    session_id,
+                    concept,
+                    confidence,
+                    now,
+                ),
+            )
 
 def get_learner_state(session_id: str) -> list[dict]:
     with get_conn() as conn:
