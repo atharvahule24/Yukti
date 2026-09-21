@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
-import { getQuiz, generateQuiz, getFact, gradeAnswer } from '../../lib/api'
+import { getQuiz, generateQuiz, getFact, gradeAnswer,
+  recordMetacognitiveCheckin,} from '../../lib/api'
 import type { GradeResult, MCQ, ShortAnswer } from '../../lib/api'
 import { Loader2, CheckCircle2, XCircle, ChevronRight, HelpCircle, MessageSquare } from 'lucide-react'
 
@@ -126,11 +127,11 @@ className="w-full p-2 bg-[var(--bg-base)] border border-[var(--border)] rounded-
 </div>
 
 <button
-onClick={handleGenerate}
-className="w-full max-w-sm flex items-center justify-center gap-2 bg-[var(--accent-purple)] text-white py-3 rounded-[var(--radius)] font-bold hover:opacity-90 transition-all"
+  onClick={handleGenerate}
 >
-Generate Quiz
+  Generate Quiz
 </button>
+
 </div>
 )
 }
@@ -372,12 +373,22 @@ className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--ra
       ].map((option) => (
         <button
           key={option.value}
-          onClick={() =>
-            setConfidenceRatings((prev) => ({
-              ...prev,
-              [question.id]: option.value,
-            }))
-          }
+          onClick={async () => {
+  setConfidenceRatings((prev) => ({
+    ...prev,
+    [question.id]: option.value,
+  }))
+
+  try {
+    await recordMetacognitiveCheckin(
+      sessionId,
+      question.concept,
+      option.value
+    )
+  } catch (e) {
+    console.error('Failed to save confidence rating:', e)
+  }
+}}
           className={`px-3 py-2 rounded-lg text-sm transition-opacity ${
             confidenceRatings[question.id] === option.value
               ? 'bg-green-500/30 text-white border border-green-400/40'

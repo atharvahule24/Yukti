@@ -322,3 +322,37 @@ def grade_answer():
         )
 
     return jsonify(fallback)
+
+@quiz_bp.route('/quiz/metacognitive', methods=['POST'])
+def save_metacognitive_checkin():
+    data, parse_error = parse_json_request(request)
+
+    if parse_error:
+        return json_error(parse_error)
+
+    session_id = data.get("session_id", "")
+    concept = data.get("concept", "")
+    confidence_rating = data.get("confidence_rating")
+
+    if not session_id or not concept or confidence_rating is None:
+        return json_error("Missing metacognitive check-in data.")
+
+    valid, error = validate_session_id(session_id)
+    if not valid:
+        return json_error(error)
+
+    try:
+        confidence_rating = int(confidence_rating)
+    except (TypeError, ValueError):
+        return json_error("Confidence rating must be an integer.")
+
+    if confidence_rating not in (1, 2, 3):
+        return json_error("Confidence rating must be 1, 2, or 3.")
+
+    record_metacognitive_checkin(
+        session_id,
+        concept,
+        confidence_rating,
+    )
+
+    return jsonify({"success": True})

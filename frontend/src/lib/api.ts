@@ -219,6 +219,24 @@ body: JSON.stringify({ question, user_answer: userAnswer, sample_answer: sampleA
   return handleResponse(response);
 }
 
+export async function recordMetacognitiveCheckin(
+  sessionId: string,
+  concept: string,
+  confidenceRating: number
+): Promise<void> {
+  const response = await fetch(`${BASE_URL}/quiz/metacognitive`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      session_id: sessionId,
+      concept,
+      confidence_rating: confidenceRating,
+    }),
+  });
+
+  await handleResponse(response);
+}
+
 export async function getNotes(sessionId: string): Promise<NotesResponse> {
   const response = await fetch(`${BASE_URL}/notes/${sessionId}`);
   return handleResponse(response);
