@@ -212,10 +212,10 @@ export async function generateQuiz(sessionId: string, options: { difficulty: str
   return handleResponse(response);
 }
 
-export async function gradeAnswer(question: string, userAnswer: string, sampleAnswer: string, sessionId?: string, concept?: string): Promise<GradeResult> {  const response = await fetch(`${BASE_URL}/quiz/grade`, {
+export async function gradeAnswer(question: string, userAnswer: string, sampleAnswer: string, sessionId?: string, concept?: string,confidenceRating?: number): Promise<GradeResult> {  const response = await fetch(`${BASE_URL}/quiz/grade`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify({ question, user_answer: userAnswer, sample_answer: sampleAnswer, session_id: sessionId, concept }),  });
+body: JSON.stringify({ question, user_answer: userAnswer, sample_answer: sampleAnswer, session_id: sessionId, concept, confidence_rating: confidenceRating }),  });
   return handleResponse(response);
 }
 

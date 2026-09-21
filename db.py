@@ -26,6 +26,21 @@ def init_db():
             )
             """
         )
+
+        conn.execute(
+    """
+    CREATE TABLE IF NOT EXISTS metacognitive_checkins (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        concept TEXT NOT NULL,
+        confidence_rating INTEGER NOT NULL,
+        reflection TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(session_id) REFERENCES sessions(session_id)
+    )
+    """
+)
+
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS messages (
@@ -508,6 +523,35 @@ def get_learner_state(session_id: str) -> list[dict]:
         ).fetchall()
 
     return [dict(row) for row in rows]
+
+def record_metacognitive_checkin(
+    session_id: str,
+    concept: str,
+    confidence_rating: int,
+    reflection: str | None = None,
+):
+    now = datetime.utcnow().isoformat()
+
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO metacognitive_checkins (
+                session_id,
+                concept,
+                confidence_rating,
+                reflection,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                concept,
+                confidence_rating,
+                reflection,
+                now,
+            ),
+        )
 
 def upsert_flashcard_progress(session_id: str, total: int, mastered: int):
     now = datetime.utcnow().isoformat()

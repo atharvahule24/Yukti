@@ -10,7 +10,11 @@ from utils.validation import (
     validate_quiz_count,
     validate_session_id,
 )
-from db import record_quiz_score, update_learner_state
+from db import (
+    record_quiz_score,
+    update_learner_state,
+    record_metacognitive_checkin,
+)
 from agents.path_optimizer import optimize_learning_path
 from agents.misconception_detector import detect_misconception
 from agents.concept_registry import (
@@ -92,6 +96,7 @@ def grade_answer():
 
     if parse_error:
         return json_error(parse_error)
+    confidence_rating = data.get("confidence_rating")
 
     question = data.get("question", "")
     user_answer = data.get("user_answer", "")
@@ -148,6 +153,13 @@ def grade_answer():
                 grading.get("missed_concepts", []),
                 grading["score"]
             )
+
+            if confidence_rating is not None:
+                record_metacognitive_checkin(
+        session_id,
+        concept,
+        int(confidence_rating),
+    )
 
             grading["learning_path"] = optimize_learning_path(
                 session_id,current_concept=concept,
@@ -266,6 +278,13 @@ def grade_answer():
                     score,
                     misconception_severity
                 )
+
+                if confidence_rating is not None:
+                    record_metacognitive_checkin(
+        session_id,
+        concept,
+        int(confidence_rating),
+    )
 
                 grading["learning_path"] = (
                     optimize_learning_path(
