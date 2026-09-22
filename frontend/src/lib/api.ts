@@ -212,6 +212,19 @@ export async function generateQuiz(sessionId: string, options: { difficulty: str
   return handleResponse(response);
 }
 
+export async function generateReassessment(
+  sessionId: string,
+  concept: string
+): Promise<ShortAnswer> {
+  const response = await fetch(`${BASE_URL}/quiz/reassess/${sessionId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ concept }),
+  });
+
+  return handleResponse(response);
+}
+
 export async function gradeAnswer(question: string, userAnswer: string, sampleAnswer: string, sessionId?: string, concept?: string,confidenceRating?: number): Promise<GradeResult> {  const response = await fetch(`${BASE_URL}/quiz/grade`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

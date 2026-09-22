@@ -556,13 +556,14 @@ def record_metacognitive_checkin(
 def get_latest_metacognitive_checkin(
     session_id: str,
     concept: str,
+    
 ):
     with get_conn() as conn:
         row = conn.execute(
             """
             SELECT confidence_rating
             FROM metacognitive_checkins
-            WHERE session_id = ? AND concept = ?
+            WHERE session_id = ? AND LOWER(concept) = LOWER(?)
             ORDER BY id DESC
             LIMIT 1
             """,

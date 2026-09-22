@@ -1,7 +1,11 @@
 from flask import Blueprint, jsonify, request
 from routes.store import session_store
 from llm.generator import Generator
-from agents.prompts import QUIZ_MCQ_PROMPT, QUIZ_SHORT_ANSWER_PROMPT
+from agents.prompts import (
+    QUIZ_MCQ_PROMPT,
+    QUIZ_SHORT_ANSWER_PROMPT,
+    TARGETED_REASSESSMENT_PROMPT,
+)
 from agents.prompts import GRADING_PROMPT
 from utils.json_helper import extract_json
 from utils.json_safe import json_error, parse_json_request
@@ -89,7 +93,71 @@ def generate_quiz(session_id):
         return jsonify(quiz)
     except Exception as e:
         return jsonify({"error": "generation_failed", "message": str(e)}), 500
-    
+
+@quiz_bp.route('/quiz/reassess/<session_id>', methods=['POST'])
+def generate_reassessment(session_id):
+    valid, error = validate_session_id(session_id)
+
+    if not valid:
+        return json_error(error)
+
+    if session_id not in session_store:
+        return jsonify({"error": "not_found"}), 404
+
+    data, parse_error = parse_json_request(request)
+
+    if parse_error:
+        return json_error(parse_error)
+
+    concept = data.get("concept", "").strip()
+
+    if not concept:
+        return json_error("Concept is required.")
+
+    full_text = session_store[session_id].get("full_text", "")
+
+    valid, error = validate_extracted_text(full_text, max_length=None)
+
+    if not valid:
+        return jsonify({"error": "no_text"}), 400
+
+    generator = Generator(json_mode=True)
+
+    try:
+        prompt = TARGETED_REASSESSMENT_PROMPT.format(
+            concept=concept
+        )
+
+        res = generator.chain.invoke({
+            "context": full_text[:6000],
+            "question": prompt,
+        })
+
+        reassessment = extract_json(res)
+
+        if not reassessment:
+            return jsonify({
+                "error": "generation_failed"
+            }), 500
+
+        questions = reassessment.get("short_answer", [])
+
+        if not questions:
+            return jsonify({
+                "error": "generation_failed"
+            }), 500
+
+        question = questions[0]
+        question["id"] = f"reassess_{concept}"
+
+        return jsonify(question)
+
+    except Exception as e:
+        return jsonify({
+            "error": "generation_failed",
+            "message": str(e),
+        }), 500
+
 @quiz_bp.route('/quiz/grade', methods=['POST'])
 def grade_answer():
     data, parse_error = parse_json_request(request)
@@ -186,6 +254,16 @@ def grade_answer():
         })
 
         grading = extract_json(res)
+
+        print(
+            "EXTRACTED GRADING:",
+            repr(grading)
+        )
+
+        if not grading:
+            raise ValueError(
+                "AI grading response could not be parsed as JSON."
+            )
 
         correct_ids = grading.get(
             "correct_concepts",

@@ -13,8 +13,24 @@ def optimize_learning_path(
             session_id,
             current_concept,
         )
+        print(
+    "METACOG DEBUG:",
+    {
+        "concept": current_concept,
+        "confidence": student_confidence,
+    }
+)
 
     states = get_learner_state(session_id)
+
+    print(
+    "OPTIMIZER DEBUG:",
+    {
+        "current_concept": current_concept,
+        "student_confidence": student_confidence,
+        "states": states,
+    }
+)
 
     if current_concept:
         current_states = [
@@ -26,6 +42,20 @@ def optimize_learning_path(
         if current_states:
             states = current_states  
 
+            print(
+            "OPTIMIZER STATE DEBUG:",
+            [
+                {
+                    "concept": state["concept"],
+                    "mastery": state["mastery"],
+                    "confidence": state["confidence"],
+                    "needs_examples": state["needs_examples"],
+                    "needs_step_by_step": state["needs_step_by_step"],
+                }
+                for state in states
+            ],
+        )
+
             if states and student_confidence is not None:
                 weakest_state = min(
             states,
@@ -35,12 +65,16 @@ def optimize_learning_path(
             ),
         )
 
-        if weakest_state["mastery"] < 50 and student_confidence == 3:
+        if (
+            weakest_state["recent_score"] < 7
+            and student_confidence == 3
+        ):
             return {
                 "action": "targeted_misconception_review",
                 "reason": (
-                    "Low mastery with high self-reported confidence "
-                    "suggests the student may need targeted misconception correction."
+                    "Low recent performance with high self-reported "
+                    "confidence suggests the student may need targeted "
+                    "misconception correction."
                 ),
                 "concept": weakest_state["concept"],
                 "mastery": weakest_state["mastery"],

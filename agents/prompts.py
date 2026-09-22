@@ -88,6 +88,20 @@ For each question, identify the short concept being tested.
 Return ONLY valid JSON, no other text:
 {"short_answer": [{"question": "str", "sample_answer": "str", "concept": "short concept name being tested"}]}"""
 
+TARGETED_REASSESSMENT_PROMPT = """Based on the provided context, generate exactly 1 short answer question to reassess the student's understanding of the specified concept.
+
+The question must:
+- Test the core concept directly.
+- Be different from the student's original question.
+- Be appropriate for a school student.
+- Focus only on the specified concept.
+- Help determine whether the student's previous misunderstanding has been corrected.
+
+Specified concept: {concept}
+
+Return ONLY valid JSON, no other text:
+{{"short_answer": [{{"question": "str", "sample_answer": "str", "concept": "{concept}"}}]}}"""
+
 NOTES_PROMPT = """Analyze the provided context and extract 5 to 7 key concepts as structured sticky notes.
 Each note must be self-contained and useful for revision.
 Prioritize concepts most likely to appear in an exam. Order cards by importance descending.
@@ -105,17 +119,22 @@ Return ONLY valid JSON, no other text:
 
 GRADING_PROMPT = """Grade this student answer on a scale of 0 to 10.
 
-Be fair, specific, and evidence-based.
+Be fair, specific, evidence-based, and sensitive to what the question actually asks.
 
 IMPORTANT:
 - First determine exactly what the question is asking.
+- Identify the core knowledge required to answer that specific question.
 - Compare the student's answer with the sample correct answer.
+- Do NOT require the student to mention every detail from the sample answer if those details are not necessary to answer the question.
+- Distinguish between essential concepts and supporting/additional details.
+- If the student demonstrates the core concept correctly using different wording, award appropriate credit.
+- If the student's answer is partially correct, award partial credit based on what they actually demonstrated.
+- Do not penalize a student heavily for omitting an additional detail that is not required by the question.
+- Do not invent mistakes or explanations that are not supported by the question and answer.
 - For numerical or mathematical questions, independently calculate and verify the correct result before assigning a score.
 - Do NOT claim that arithmetic is incorrect unless you have actually checked the calculation yourself.
 - If the student's answer matches the correct result, treat it as correct even if the reasoning is not shown.
-- If the student's answer is partially correct, award partial credit based on the demonstrated work.
-- Do not invent mistakes or explanations that are not supported by the question and answer.
-- Feedback must tell the student exactly what to study or improve next.
+- Feedback must tell the student exactly what they should improve next.
 
 Question: {question}
 Sample correct answer: {sample_answer}
@@ -131,6 +150,9 @@ IMPORTANT CONCEPT RULE:
 - A concept ID can appear in either correct_concepts or missed_concepts.
 - Every concept ID must come from the provided canonical concept list.
 - If the student's wording differs from the canonical concept wording, select the matching concept ID.
+- Only mark a concept as missed when it is relevant to the question and is necessary or meaningfully important for answering it.
+- Do NOT mark an additional/supporting concept as missed merely because the student did not mention it.
+- If the student demonstrates the central idea of the question, recognize that even if some supporting details are absent.
 
 Canonical concepts:
 {canonical_concepts}
@@ -139,7 +161,7 @@ Return ONLY valid JSON:
 {{
   "score": 10,
   "feedback": "Specific, evidence-based feedback in 1-2 sentences",
-  "correct_concepts": ["list of concepts the student got right"],
-"missed_concepts": ["list of concepts the student missed or got wrong"],
+  "correct_concepts": ["list of concept IDs the student demonstrated"],
+  "missed_concepts": ["list of relevant concept IDs the student genuinely missed"],
   "study_tip": "One specific thing the student should review next"
 }}"""
