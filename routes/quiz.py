@@ -355,4 +355,12 @@ def save_metacognitive_checkin():
         confidence_rating,
     )
 
-    return jsonify({"success": True})
+    learning_path = optimize_learning_path(
+        session_id,
+        current_concept=concept,
+    )
+
+    return jsonify({
+        "success": True,
+        "learning_path": learning_path,
+    })

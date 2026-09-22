@@ -223,7 +223,7 @@ export async function recordMetacognitiveCheckin(
   sessionId: string,
   concept: string,
   confidenceRating: number
-): Promise<void> {
+): Promise<{ learning_path: LearningPath }> {
   const response = await fetch(`${BASE_URL}/quiz/metacognitive`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -234,7 +234,7 @@ export async function recordMetacognitiveCheckin(
     }),
   });
 
-  await handleResponse(response);
+  return handleResponse(response);
 }
 
 export async function getNotes(sessionId: string): Promise<NotesResponse> {

@@ -553,6 +553,24 @@ def record_metacognitive_checkin(
             ),
         )
 
+def get_latest_metacognitive_checkin(
+    session_id: str,
+    concept: str,
+):
+    with get_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT confidence_rating
+            FROM metacognitive_checkins
+            WHERE session_id = ? AND concept = ?
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (session_id, concept),
+        ).fetchone()
+
+    return row["confidence_rating"] if row else None
+
 def upsert_flashcard_progress(session_id: str, total: int, mastered: int):
     now = datetime.utcnow().isoformat()
     with get_conn() as conn:

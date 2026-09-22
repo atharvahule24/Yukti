@@ -380,11 +380,19 @@ className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--ra
   }))
 
   try {
-    await recordMetacognitiveCheckin(
-      sessionId,
-      question.concept,
-      option.value
-    )
+    const result = await recordMetacognitiveCheckin(
+  sessionId,
+  question.concept,
+  option.value
+)
+
+setGradingResults((prev) => ({
+  ...prev,
+  [question.id]: {
+    ...prev[question.id],
+    learning_path: result.learning_path,
+  },
+}))
   } catch (e) {
     console.error('Failed to save confidence rating:', e)
   }

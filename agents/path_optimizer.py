@@ -1,17 +1,65 @@
-from db import get_learner_state
+from db import get_learner_state, get_latest_metacognitive_checkin
 from agents.concept_registry import get_canonical_concepts
 
 
-def optimize_learning_path(session_id: str, current_concept: str | None = None) -> dict:
+def optimize_learning_path(
+    session_id: str,
+    current_concept: str | None = None,
+) -> dict:
+    student_confidence = None
+
+    if current_concept:
+        student_confidence = get_latest_metacognitive_checkin(
+            session_id,
+            current_concept,
+        )
+
     states = get_learner_state(session_id)
+
     if current_concept:
         current_states = [
-            state for state in states
+            state
+            for state in states
             if state["concept"].lower() == current_concept.lower()
         ]
 
         if current_states:
-            states = current_states    
+            states = current_states  
+
+            if states and student_confidence is not None:
+                weakest_state = min(
+            states,
+            key=lambda state: (
+                state["mastery"],
+                state["confidence"],
+            ),
+        )
+
+        if weakest_state["mastery"] < 50 and student_confidence == 3:
+            return {
+                "action": "targeted_misconception_review",
+                "reason": (
+                    "Low mastery with high self-reported confidence "
+                    "suggests the student may need targeted misconception correction."
+                ),
+                "concept": weakest_state["concept"],
+                "mastery": weakest_state["mastery"],
+                "confidence": weakest_state["confidence"],
+                "difficulty": "easy",
+            }
+
+        if weakest_state["mastery"] < 50 and student_confidence == 1:
+            return {
+                "action": "step_by_step_review",
+                "reason": (
+                    "Low mastery with low self-reported confidence "
+                    "suggests the student needs additional scaffolding."
+                ),
+                "concept": weakest_state["concept"],
+                "mastery": weakest_state["mastery"],
+                "confidence": weakest_state["confidence"],
+                "difficulty": "easy",
+            }
 
     if not states:
         return {
