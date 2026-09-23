@@ -560,6 +560,37 @@ setGradingResults((prev) => ({
             <p className="text-sm text-white/70 mt-1">
               {reassessmentResults[question.id].feedback}
             </p>
+        {reassessmentResults[question.id].learning_path && (
+  <p className="text-sm text-blue-300 mt-3">
+    Next step:{' '}
+    {reassessmentResults[question.id].learning_path!.action.replaceAll(
+      '_',
+      ' '
+    )}
+  </p>
+)}
+
+{reassessmentResults[question.id].learning_path?.action ===
+  'targeted_misconception_review' && (
+  <button
+    onClick={() => {
+      const concept =
+        reassessmentResults[question.id].learning_path?.concept ||
+        question.concept
+
+      const prompt = `Help me correct my misunderstanding of ${concept}. Focus on the specific misconception in my answer, explain the correct concept clearly, and then ask me one checking question.`
+
+      window.dispatchEvent(
+        new CustomEvent('yukti:ask', {
+          detail: prompt,
+        })
+      )
+    }}
+    className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--radius)] text-sm font-medium hover:opacity-90 transition-opacity"
+  >
+    Continue Targeted Review
+  </button>
+)}
           </div>
         )}
       </div>
