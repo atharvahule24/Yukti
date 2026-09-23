@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getQuiz, generateQuiz, getFact, gradeAnswer,
-  recordMetacognitiveCheckin,generateReassessment,} from '../../lib/api'
+recordMetacognitiveCheckin,generateReassessment,} from '../../lib/api'
 import type { GradeResult, MCQ, ShortAnswer } from '../../lib/api'
 import { Loader2, CheckCircle2, XCircle, ChevronRight, HelpCircle, MessageSquare } from 'lucide-react'
 
@@ -18,14 +18,14 @@ const [gradingResults, setGradingResults] = useState<Record<string, GradeResult>
 const [gradingQuestionId, setGradingQuestionId] = useState<string | null>(null)
 const [confidenceRatings, setConfidenceRatings] = useState<Record<string, number>>({})
 const [reassessmentQuestions, setReassessmentQuestions] = useState<
-  Record<string, ShortAnswer>
+Record<string, ShortAnswer>
 >({})
 const [reassessmentAnswers, setReassessmentAnswers] = useState<
-  Record<string, string>
+Record<string, string>
 >({})
 const [reassessmentLoading, setReassessmentLoading] = useState<string | null>(null)
 const [reassessmentResults, setReassessmentResults] = useState<
-  Record<string, GradeResult>
+Record<string, GradeResult>
 >({})
 
 // Generation State
@@ -89,25 +89,47 @@ setGradingQuestionId(null)
 }
 
 const handleGenerateReassessment = async (questionId: string, concept: string) => {
-  setReassessmentLoading(questionId)
+setReassessmentLoading(questionId)
 
-  try {
-    const question = await generateReassessment(sessionId, concept)
+try {
+const question = await generateReassessment(sessionId, concept)
 
-    setReassessmentQuestions((prev) => ({
-      ...prev,
-      [questionId]: question,
-    }))
+setReassessmentQuestions((prev) => ({
+...prev,
+[questionId]: question,
+}))
 
-    setReassessmentAnswers((prev) => ({
-      ...prev,
-      [questionId]: '',
-    }))
-  } catch (e) {
-    console.error('Failed to generate reassessment:', e)
-  } finally {
-    setReassessmentLoading(null)
-  }
+setReassessmentAnswers((prev) => ({
+...prev,
+[questionId]: '',
+}))
+} catch (e) {
+console.error('Failed to generate reassessment:', e)
+} finally {
+setReassessmentLoading(null)
+}
+}
+
+const getTeachingModeForAction = (action: string) => {
+switch (action) {
+case 'step_by_step_review':
+return 'simple'
+
+case 'example_based_review':
+return 'feynman'
+
+case 'targeted_misconception_review':
+return 'socratic'
+
+case 'practice':
+return 'exam'
+
+case 'advance':
+return 'simple'
+
+default:
+return 'simple'
+}
 }
 
 if (loading) return <div className="flex justify-center p-8"><Loader2 className="animate-spin text-[var(--accent-purple)]" /></div>
@@ -159,9 +181,9 @@ className="w-full p-2 bg-[var(--bg-base)] border border-[var(--border)] rounded-
 </div>
 
 <button
-  onClick={handleGenerate}
+onClick={handleGenerate}
 >
-  Generate Quiz
+Generate Quiz
 </button>
 
 </div>
@@ -385,222 +407,234 @@ className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--ra
 </div>
 <p className="text-sm text-[var(--text-secondary)] leading-relaxed">{result.feedback}</p>
 {result.study_tip && (
-  <div className="mt-3 p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
-    <p className="text-xs text-purple-300/80 font-medium mb-1">Study tip</p>
-    <p className="text-sm text-white/70">{result.study_tip}</p>
-  </div>
+<div className="mt-3 p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
+<p className="text-xs text-purple-300/80 font-medium mb-1">Study tip</p>
+<p className="text-sm text-white/70">{result.study_tip}</p>
+</div>
 )}
 
 {result && (
-  <div className="mt-3 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
-    <p className="text-xs text-green-300/80 font-medium mb-2">
-      How confident were you in your answer?
-    </p>
+<div className="mt-3 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+<p className="text-xs text-green-300/80 font-medium mb-2">
+How confident were you in your answer?
+</p>
 
-    <div className="flex gap-2 flex-wrap">
-      {[
-        { value: 1, label: 'Not confident' },
-        { value: 2, label: 'Somewhat confident' },
-        { value: 3, label: 'Confident' },
-      ].map((option) => (
-        <button
-          key={option.value}
-          onClick={async () => {
-  setConfidenceRatings((prev) => ({
-    ...prev,
-    [question.id]: option.value,
-  }))
+<div className="flex gap-2 flex-wrap">
+{[
+{ value: 1, label: 'Not confident' },
+{ value: 2, label: 'Somewhat confident' },
+{ value: 3, label: 'Confident' },
+].map((option) => (
+<button
+key={option.value}
+onClick={async () => {
+setConfidenceRatings((prev) => ({
+...prev,
+[question.id]: option.value,
+}))
 
-  try {
-    const result = await recordMetacognitiveCheckin(
-  sessionId,
-  question.concept,
-  option.value
+try {
+const result = await recordMetacognitiveCheckin(
+sessionId,
+question.concept,
+option.value
 )
 
 setGradingResults((prev) => ({
-  ...prev,
-  [question.id]: {
-    ...prev[question.id],
-    learning_path: result.learning_path,
-  },
+...prev,
+[question.id]: {
+...prev[question.id],
+learning_path: result.learning_path,
+},
 }))
-  } catch (e) {
-    console.error('Failed to save confidence rating:', e)
-  }
+} catch (e) {
+console.error('Failed to save confidence rating:', e)
+}
 }}
-          className={`px-3 py-2 rounded-lg text-sm transition-opacity ${
-            confidenceRatings[question.id] === option.value
-              ? 'bg-green-500/30 text-white border border-green-400/40'
-              : 'bg-white/5 text-white/70 border border-white/10 hover:opacity-90'
-          }`}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  </div>
+className={`px-3 py-2 rounded-lg text-sm transition-opacity ${
+confidenceRatings[question.id] === option.value
+? 'bg-green-500/30 text-white border border-green-400/40'
+: 'bg-white/5 text-white/70 border border-white/10 hover:opacity-90'
+}`}
+>
+{option.label}
+</button>
+))}
+</div>
+</div>
 )}
 
 {result.learning_path && (
-  <div className="mt-4 p-4 rounded-lg bg-blue-500/10 border border-blue-500/20">
-    <p className="text-xs text-blue-300/80 font-medium mb-1">
-      Your Next Learning Step
-    </p>
+<div className="mt-4 p-4 rounded-lg bg-blue-500/10 border border-blue-500/20">
+<p className="text-xs text-blue-300/80 font-medium mb-1">
+Your Next Learning Step
+</p>
 
-    <p className="text-sm text-white font-medium">
-      Action: {result.learning_path.action.replaceAll('_', ' ')}
-    </p>
+<p className="text-sm text-white font-medium">
+Action: {result.learning_path.action.replaceAll('_', ' ')}
+</p>
 
-    {result.learning_path.concept && (
-      <p className="text-sm text-white/70 mt-1">
-        Concept: {result.learning_path.concept}
-      </p>
-    )}
+{result.learning_path.concept && (
+<p className="text-sm text-white/70 mt-1">
+Concept: {result.learning_path.concept}
+</p>
+)}
 
-    {result.learning_path.action === 'targeted_misconception_review' && (
-      <>
-        <button
-          onClick={() => {
-            const concept =
-              result.learning_path?.concept || 'this concept'
+{result.learning_path.action === 'targeted_misconception_review' && (
+<>
+<button
+onClick={() => {
+const concept =
+result.learning_path?.concept || 'this concept'
 
-            const prompt = `Help me correct my misunderstanding of ${concept}. Focus on the specific misconception in my answer, explain the correct concept clearly, and then ask me one checking question to verify my understanding.`
+const prompt = `Help me correct my misunderstanding of ${concept}. Focus on the specific misconception in my answer, explain the correct concept clearly, and then ask me one checking question to verify my understanding.`
 
-            window.dispatchEvent(
-              new CustomEvent('yukti:ask', {
-                detail: prompt,
-              })
-            )
-          }}
-          className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--radius)] text-sm font-medium hover:opacity-90 transition-opacity"
-        >
-          Start Targeted Misconception Review
-        </button>
+window.dispatchEvent(
+new CustomEvent('yukti:ask', {
+detail: {
+prompt,
+teachingMode: 'socratic',
+},
+})
+)
+}}
+className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--radius)] text-sm font-medium hover:opacity-90 transition-opacity"
+>
+Start Targeted Misconception Review
+</button>
 
-        {reassessmentLoading === question.id ? (
-          <p className="mt-3 text-sm text-white/60">
-            Generating a fresh checking question...
-          </p>
-        ) : (
-          <button
-            onClick={() =>
-              handleGenerateReassessment(
-                question.id,
-                result.learning_path?.concept || question.concept
-              )
-            }
-            className="mt-3 ml-2 px-4 py-2 bg-white/10 text-white rounded-[var(--radius)] text-sm font-medium hover:opacity-90 transition-opacity"
-          >
-            Re-assess My Understanding
-          </button>
-        )}
-      </>
-    )}
+{reassessmentLoading === question.id ? (
+<p className="mt-3 text-sm text-white/60">
+Generating a fresh checking question...
+</p>
+) : (
+<button
+onClick={() =>
+handleGenerateReassessment(
+question.id,
+result.learning_path?.concept || question.concept
+)
+}
+className="mt-3 ml-2 px-4 py-2 bg-white/10 text-white rounded-[var(--radius)] text-sm font-medium hover:opacity-90 transition-opacity"
+>
+Re-assess My Understanding
+</button>
+)}
+</>
+)}
 
-    {reassessmentQuestions[question.id] && (
-      <div className="mt-4 p-4 rounded-lg bg-purple-500/10 border border-purple-500/20">
-        <p className="text-xs text-purple-300/80 font-medium mb-2">
-          Check Your Understanding
-        </p>
+{reassessmentQuestions[question.id] && (
+<div className="mt-4 p-4 rounded-lg bg-purple-500/10 border border-purple-500/20">
+<p className="text-xs text-purple-300/80 font-medium mb-2">
+Check Your Understanding
+</p>
 
-        <p className="text-sm text-white/90 mb-3">
-          {reassessmentQuestions[question.id].question}
-        </p>
+<p className="text-sm text-white/90 mb-3">
+{reassessmentQuestions[question.id].question}
+</p>
 
-        <textarea
-          value={reassessmentAnswers[question.id] || ''}
-          onChange={(e) =>
-            setReassessmentAnswers((prev) => ({
-              ...prev,
-              [question.id]: e.target.value,
-            }))
-          }
-          placeholder="Explain your answer..."
-          className="w-full min-h-24 p-3 rounded-lg bg-black/20 border border-white/10 text-white text-sm resize-none focus:outline-none focus:border-purple-400/50"
-        />
+<textarea
+value={reassessmentAnswers[question.id] || ''}
+onChange={(e) =>
+setReassessmentAnswers((prev) => ({
+...prev,
+[question.id]: e.target.value,
+}))
+}
+placeholder="Explain your answer..."
+className="w-full min-h-24 p-3 rounded-lg bg-black/20 border border-white/10 text-white text-sm resize-none focus:outline-none focus:border-purple-400/50"
+/>
 
-        <button
-          onClick={async () => {
-            const reassessment = reassessmentQuestions[question.id]
-            const answer = reassessmentAnswers[question.id]?.trim()
+<button
+onClick={async () => {
+const reassessment = reassessmentQuestions[question.id]
+const answer = reassessmentAnswers[question.id]?.trim()
 
-            if (!reassessment || !answer) return
+if (!reassessment || !answer) return
 
-            try {
-              const result = await gradeAnswer(
-                reassessment.question,
-                answer,
-                reassessment.sample_answer,
-                sessionId,
-                reassessment.concept
-              )
+try {
+const result = await gradeAnswer(
+reassessment.question,
+answer,
+reassessment.sample_answer,
+sessionId,
+reassessment.concept,
+undefined,
+true
+)
+console.log('REASSESSMENT RESULT:', result)
+setReassessmentResults((prev) => ({
+...prev,
+[question.id]: result,
+}))
+} catch (e) {
+console.error('Failed to grade reassessment:', e)
+}
+}}
+disabled={!reassessmentAnswers[question.id]?.trim()}
+className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--radius)] text-sm font-medium disabled:opacity-50"
+>
+Check My Understanding
+</button>
 
-              setReassessmentResults((prev) => ({
-                ...prev,
-                [question.id]: result,
-              }))
-            } catch (e) {
-              console.error('Failed to grade reassessment:', e)
-            }
-          }}
-          disabled={!reassessmentAnswers[question.id]?.trim()}
-          className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--radius)] text-sm font-medium disabled:opacity-50"
-        >
-          Check My Understanding
-        </button>
+{reassessmentResults[question.id] && (
+<div className="mt-4 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
+<p className="text-sm font-semibold text-white">
+Re-assessment Score:{' '}
+{reassessmentResults[question.id].score}/10
+</p>
 
-        {reassessmentResults[question.id] && (
-          <div className="mt-4 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
-            <p className="text-sm font-semibold text-white">
-              Re-assessment Score:{' '}
-              {reassessmentResults[question.id].score}/10
-            </p>
-
-            <p className="text-sm text-white/70 mt-1">
-              {reassessmentResults[question.id].feedback}
-            </p>
-        {reassessmentResults[question.id].learning_path && (
-  <p className="text-sm text-blue-300 mt-3">
-    Next step:{' '}
-    {reassessmentResults[question.id].learning_path!.action.replaceAll(
-      '_',
-      ' '
-    )}
-  </p>
+<p className="text-sm text-white/70 mt-1">
+{reassessmentResults[question.id].feedback}
+</p>
+{reassessmentResults[question.id].learning_path && (
+<p className="text-sm text-blue-300 mt-3">
+Next step:{' '}
+{reassessmentResults[question.id].learning_path!.action.replaceAll(
+'_',
+' '
+)}
+</p>
 )}
 
 {reassessmentResults[question.id].learning_path?.action ===
-  'targeted_misconception_review' && (
-  <button
-    onClick={() => {
-      const concept =
-        reassessmentResults[question.id].learning_path?.concept ||
-        question.concept
+'targeted_misconception_review' && (
+<button
+onClick={() => {
+const concept =
+reassessmentResults[question.id].learning_path?.concept ||
+question.concept
 
-      const prompt = `Help me correct my misunderstanding of ${concept}. Focus on the specific misconception in my answer, explain the correct concept clearly, and then ask me one checking question.`
+const prompt = `Help me correct my misunderstanding of ${concept}. Focus on the specific misconception in my answer, explain the correct concept clearly, and then ask me one checking question.`
 
-      window.dispatchEvent(
-        new CustomEvent('yukti:ask', {
-          detail: prompt,
-        })
-      )
-    }}
-    className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--radius)] text-sm font-medium hover:opacity-90 transition-opacity"
-  >
-    Continue Targeted Review
-  </button>
+window.dispatchEvent(
+new CustomEvent('yukti:ask', {
+detail: {
+prompt,
+teachingMode: getTeachingModeForAction(
+result.learning_path?.action || ''
+),
+},
+})
+)
+}}
+className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--radius)] text-sm font-medium hover:opacity-90 transition-opacity"
+>
+Continue Targeted Review
+</button>
 )}
-          </div>
-        )}
-      </div>
-    )}
+</div>
+)}
+</div>
+)}
 
-    <p className="text-sm text-white/70 mt-3">
-      <span className="font-medium">Why:</span>{' '}
-      {result.learning_path.reason}
-    </p>
-  </div>
+{!reassessmentResults[question.id] && (
+<p className="text-sm text-white/70 mt-3">
+<span className="font-medium">Why:</span>{' '}
+{result.learning_path.reason}
+</p>
+)}
+</div>
 )}
 </div>
 )}

@@ -246,10 +246,19 @@ export function ChatInterface({ sessionId }: { sessionId: string }) {
 
   useEffect(() => {
     const handleAsk = (e: Event) => {
-      const question = e instanceof CustomEvent ? e.detail : undefined
-      if (question && !isLoading) {
-        sendMessage(question, sessionId, currentMode)
-      }
+      const detail = e instanceof CustomEvent ? e.detail : undefined
+
+if (detail && !isLoading) {
+  if (typeof detail === 'string') {
+    sendMessage(detail, sessionId, currentMode)
+  } else {
+    sendMessage(
+      detail.prompt,
+      sessionId,
+      detail.teachingMode || currentMode
+    )
+  }
+}
     }
     window.addEventListener('yukti:ask', handleAsk)
     return () => window.removeEventListener('yukti:ask', handleAsk)

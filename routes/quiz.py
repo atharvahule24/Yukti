@@ -164,7 +164,9 @@ def grade_answer():
 
     if parse_error:
         return json_error(parse_error)
+
     confidence_rating = data.get("confidence_rating")
+    is_reassessment = data.get("is_reassessment", False)
 
     question = data.get("question", "")
     user_answer = data.get("user_answer", "")
@@ -224,14 +226,16 @@ def grade_answer():
 
             if confidence_rating is not None:
                 record_metacognitive_checkin(
-        session_id,
-        concept,
-        int(confidence_rating),
-    )
+                    session_id,
+                    concept,
+                    int(confidence_rating),
+                )
 
-            grading["learning_path"] = optimize_learning_path(
-                session_id,current_concept=concept,
-            )
+            if is_reassessment or confidence_rating is not None:
+                grading["learning_path"] = optimize_learning_path(
+                    session_id,
+                    current_concept=concept
+                )
 
         return jsonify(grading)
 
@@ -292,85 +296,85 @@ def grade_answer():
             repr(res)
         )
 
-        if grading:
-            score = float(
-                grading.get("score", 0) or 0
+        score = float(
+            grading.get("score", 0) or 0
+        )
+
+        # Detect misconception for incorrect answers.
+        if score < 7:
+            grading["misconception"] = detect_misconception(
+                question=question,
+                student_answer=user_answer,
+                sample_answer=sample_answer,
+                concept=concept,
             )
 
-            # Detect misconception for incorrect answers.
-            # This does not require a session.
-            if score < 7:
-                grading["misconception"] = detect_misconception(
-                    question=question,
-                    student_answer=user_answer,
-                    sample_answer=sample_answer,
-                    concept=concept,
-                )
+        # Update persistent learner data
+        # only when a valid session exists.
+        if session_id:
+            record_quiz_score(
+                session_id,
+                score
+            )
 
-            # Update persistent learner data only
-            # when a valid session exists.
-            if session_id:
-                record_quiz_score(
-                    session_id,
-                    score
+            correct_concepts = list(
+                grading.get(
+                    "correct_concepts",
+                    []
                 )
+            )
 
-                correct_concepts = list(
-                    grading.get(
-                        "correct_concepts",
-                        []
+            missed_concepts = list(
+                grading.get(
+                    "missed_concepts",
+                    []
+                )
+            )
+
+            if (
+                concept not in correct_concepts
+                and concept not in missed_concepts
+            ):
+                if score >= 7:
+                    correct_concepts.append(
+                        concept
                     )
-                )
-
-                missed_concepts = list(
-                    grading.get(
-                        "missed_concepts",
-                        []
+                else:
+                    missed_concepts.append(
+                        concept
                     )
-                )
 
-                if (
-                    concept not in correct_concepts
-                    and concept not in missed_concepts
-                ):
-                    if score >= 7:
-                        correct_concepts.append(
-                            concept
-                        )
-                    else:
-                        missed_concepts.append(
-                            concept
-                        )
+            misconception_severity = None
 
-                misconception_severity = None
-
-                if grading.get("misconception"):
-                    misconception_severity = grading["misconception"].get(
+            if grading.get("misconception"):
+                misconception_severity = (
+                    grading["misconception"].get(
                         "severity"
                     )
+                )
 
-                update_learner_state(
+            update_learner_state(
+                session_id,
+                correct_concepts,
+                missed_concepts,
+                score,
+                misconception_severity
+            )
+
+            if confidence_rating is not None:
+                record_metacognitive_checkin(
                     session_id,
-                    correct_concepts,
-                    missed_concepts,
-                    score,
-                    misconception_severity
+                    concept,
+                    int(confidence_rating),
                 )
 
-                if confidence_rating is not None:
-                    record_metacognitive_checkin(
-        session_id,
-        concept,
-        int(confidence_rating),
-    )
-
-                grading["learning_path"] = (
-                    optimize_learning_path(
-                        session_id,current_concept=concept
-                    )
+            if is_reassessment or confidence_rating is not None:
+                grading["learning_path"] = optimize_learning_path(
+                    session_id,
+                    current_concept=concept
                 )
 
-            return jsonify(grading)
+        return jsonify(grading)
 
     except Exception as e:
         print(
@@ -378,28 +382,10 @@ def grade_answer():
             repr(e)
         )
 
-    # 3. Fallback if AI grading fails
-    fallback = {
-        "score": 5,
-        "feedback": (
-            "Unable to grade automatically. "
-            "Please compare with sample answer."
-        ),
-        "correct_concepts": [],
-        "missed_concepts": [],
-        "study_tip": (
-            "Review the sample answer and compare "
-            "it against your response."
-        )
-    }
-
-    if session_id:
-        record_quiz_score(
-            session_id,
-            fallback["score"]
-        )
-
-    return jsonify(fallback)
+        return jsonify({
+            "error": "server_error",
+            "message": str(e)
+        }), 500
 
 @quiz_bp.route('/quiz/metacognitive', methods=['POST'])
 def save_metacognitive_checkin():

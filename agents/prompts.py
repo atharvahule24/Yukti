@@ -128,20 +128,29 @@ GRADING_PROMPT = """Grade this student answer on a scale of 0 to 10.
 
 Be fair, specific, evidence-based, and sensitive to what the question actually asks.
 
-IMPORTANT:
-- First determine exactly what the question is asking.
-- Identify the core knowledge required to answer that specific question.
-- Compare the student's answer with the sample correct answer.
-- Do NOT require the student to mention every detail from the sample answer if those details are not necessary to answer the question.
-- Distinguish between essential concepts and supporting/additional details.
-- If the student demonstrates the core concept correctly using different wording, award appropriate credit.
-- If the student's answer is partially correct, award partial credit based on what they actually demonstrated.
-- Do not penalize a student heavily for omitting an additional detail that is not required by the question.
-- Do not invent mistakes or explanations that are not supported by the question and answer.
-- For numerical or mathematical questions, independently calculate and verify the correct result before assigning a score.
-- Do NOT claim that arithmetic is incorrect unless you have actually checked the calculation yourself.
-- If the student's answer matches the correct result, treat it as correct even if the reasoning is not shown.
-- Feedback must tell the student exactly what they should improve next.
+IMPORTANT GRADING PROCESS:
+1. First determine exactly what the question is asking.
+2. Identify the essential factual information required to answer that question.
+3. Compare the student's answer with the sample correct answer.
+4. Check whether the student's answer actually contains those essential facts.
+5. Do NOT award full credit merely because the answer sounds generally related to the topic.
+6. A vague statement about a topic is NOT equivalent to identifying the specific fact asked by the question.
+7. If the student gives only a broad/general statement but does not provide the specific information required by the question, award partial credit.
+8. If the student gives some required information but misses another essential part, award partial credit.
+9. Award 9-10 only when the student clearly demonstrates the essential knowledge required by the question.
+10. If the student's wording differs from the sample answer but clearly communicates the same essential fact, award appropriate credit.
+11. Do NOT require every supporting detail from the sample answer when those details are not necessary.
+12. Do NOT invent mistakes or explanations that are not supported by the question and answer.
+13. For numerical or mathematical questions, independently calculate and verify the correct result before assigning a score.
+14. Do NOT claim that arithmetic is incorrect unless you have actually checked the calculation yourself.
+15. If the student's answer matches the required correct result, treat it as correct even if the reasoning is not shown.
+16. Feedback must tell the student exactly what they should improve next.
+
+IMPORTANT VAGUE-ANSWER RULE:
+- If the question asks for a specific event, date, person, cause, consequence, definition, process, or historical change, the student must actually identify that specific information.
+- Generic statements such as "it was an important year", "it caused major changes", "it affected society", or "it changed governance" are not sufficient by themselves when the question asks what specifically happened or why it was significant.
+- For example, if the question asks about the significance of 1858, saying "1858 brought a major change in British governance" shows some understanding but does NOT identify the essential event that the British Crown took direct control from the East India Company. This should receive partial rather than full credit.
+- Do not confuse topical relevance with demonstrated knowledge.
 
 Question: {question}
 Sample correct answer: {sample_answer}
@@ -159,7 +168,7 @@ IMPORTANT CONCEPT RULE:
 - If the student's wording differs from the canonical concept wording, select the matching concept ID.
 - Only mark a concept as missed when it is relevant to the question and is necessary or meaningfully important for answering it.
 - Do NOT mark an additional/supporting concept as missed merely because the student did not mention it.
-- If the student demonstrates the central idea of the question, recognize that even if some supporting details are absent.
+- If the student demonstrates only a broad idea but misses the essential specific fact represented by a canonical concept, that concept should be marked as missed.
 
 Canonical concepts:
 {canonical_concepts}

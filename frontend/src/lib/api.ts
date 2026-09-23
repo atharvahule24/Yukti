@@ -225,10 +225,10 @@ export async function generateReassessment(
   return handleResponse(response);
 }
 
-export async function gradeAnswer(question: string, userAnswer: string, sampleAnswer: string, sessionId?: string, concept?: string,confidenceRating?: number): Promise<GradeResult> {  const response = await fetch(`${BASE_URL}/quiz/grade`, {
+export async function gradeAnswer(question: string, userAnswer: string, sampleAnswer: string, sessionId?: string, concept?: string,confidenceRating?: number,isReassessment?: boolean): Promise<GradeResult> {  const response = await fetch(`${BASE_URL}/quiz/grade`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-body: JSON.stringify({ question, user_answer: userAnswer, sample_answer: sampleAnswer, session_id: sessionId, concept, confidence_rating: confidenceRating }),  });
+body: JSON.stringify({ question, user_answer: userAnswer, sample_answer: sampleAnswer, session_id: sessionId, concept, confidence_rating: confidenceRating, is_reassessment: isReassessment }),  });
   return handleResponse(response);
 }
 

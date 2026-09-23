@@ -221,4 +221,4 @@ def api_chat():
 
 if __name__ == '__main__':
     debug = os.getenv("DEBUG", "false").lower() == "true"
-    app.run(debug=True)
+    app.run(debug=True, use_reloader=False)
