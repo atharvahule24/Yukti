@@ -1,4 +1,6 @@
+from agents.adaptive_orchestrator import get_next_learning_action
 from flask import Blueprint, jsonify, request
+from agents.mastery_engine import update_mastery_from_assessment
 from routes.store import session_store
 from llm.generator import Generator
 from agents.prompts import (
@@ -16,10 +18,12 @@ from utils.validation import (
 )
 from db import (
     record_quiz_score,
-    update_learner_state,
     record_metacognitive_checkin,
+    record_misconception,
+    resolve_misconceptions,
 )
 from agents.path_optimizer import optimize_learning_path
+from agents.adaptive_question_engine import get_adaptive_question_plan
 from agents.misconception_detector import detect_misconception
 from agents.concept_registry import (
     get_canonical_concept,
@@ -57,13 +61,47 @@ def generate_quiz(session_id):
     data, parse_error = parse_json_request(request)
     if parse_error:
         return json_error(parse_error)
-    difficulty = data.get('difficulty', 'medium')
-    count, count_error = validate_quiz_count(data.get('count', 5))
+    difficulty = data.get("difficulty", "medium")
+    count, count_error = validate_quiz_count(data.get("count", 5))
+
     if count_error:
         return json_error(count_error)
-    
-    # We could adjust prompts based on difficulty and count, but for now we'll append to the prompt.
-    custom_instruction = f" Ensure the difficulty is {difficulty}. Generate exactly {count} questions."
+
+    adaptive_context = get_next_learning_action(session_id)
+    adaptive_plan = adaptive_context["question_plan"]
+
+    adaptive_instruction = ""
+
+    if adaptive_plan.get("concept"):
+        adaptive_instruction = f"""
+    Adapt the quiz to the learner's current learning state.
+
+    Target concept: {adaptive_plan["concept"]}
+    Adaptive target: {adaptive_plan["target"]}
+    Question style: {adaptive_plan["question_type"]}
+    Recommended difficulty: {adaptive_plan["difficulty"]}
+
+    Reason for this adaptation:
+    {adaptive_plan["reason"]}
+    """
+
+        if adaptive_plan.get("misconception"):
+            adaptive_instruction += f"""
+    Known learner misconception:
+    {adaptive_plan["misconception"]}
+
+    Evidence:
+    {adaptive_plan.get("evidence", "")}
+
+    Create questions that specifically test whether the learner
+    understands this misconception correctly.
+    Do not reveal the answer in the question.
+    """
+
+    custom_instruction = f"""
+    Ensure the difficulty is {difficulty}.
+    Generate exactly {count} questions.
+    """ + adaptive_instruction
     
     generator = Generator(json_mode=True)
     try:
@@ -82,15 +120,17 @@ def generate_quiz(session_id):
         
         for i, m in enumerate(mcq.get("mcq", [])):
             m["id"] = f"mcq_{i}"
+            m["concept"] = adaptive_plan.get("concept")
             
         for i, s in enumerate(sa.get("short_answer", [])):
             s["id"] = f"sa_{i}"
+            s["concept"] = adaptive_plan.get("concept")
             
         quiz = {"mcq": mcq.get("mcq", []), "short_answer": sa.get("short_answer", [])}
         session_data = session_store[session_id]
         session_data["quiz"] = quiz
         session_store[session_id] = session_data
-        return jsonify(quiz)
+        return jsonify({**quiz,"adaptive_plan": adaptive_plan,"adaptive_context": adaptive_context,})
     except Exception as e:
         return jsonify({"error": "generation_failed", "message": str(e)}), 500
 
@@ -168,13 +208,13 @@ def grade_answer():
     confidence_rating = data.get("confidence_rating")
     is_reassessment = data.get("is_reassessment", False)
 
-    question = data.get("question", "")
-    user_answer = data.get("user_answer", "")
-    sample_answer = data.get("sample_answer", "")
+    question = data.get("question") or ""
+    user_answer = data.get("user_answer") or ""
+    sample_answer = data.get("sample_answer") or ""
 
-    concept = get_canonical_concept(
-        data.get("concept", question)
-    )
+    concept_input = data.get("concept") or question or ""
+    concept = get_canonical_concept(concept_input)
+    
 
     session_id = data.get("session_id", "")
 
@@ -217,12 +257,13 @@ def grade_answer():
                 grading["score"]
             )
 
-            update_learner_state(
-                session_id,
-                grading.get("correct_concepts", []),
-                grading.get("missed_concepts", []),
-                grading["score"]
+            mastery_result = update_mastery_from_assessment(
+                session_id=session_id,
+                concept=concept,
+                score=grading["score"],
+                correct=True,
             )
+            grading["mastery_update"] = mastery_result
 
             if confidence_rating is not None:
                 record_metacognitive_checkin(
@@ -336,30 +377,49 @@ def grade_answer():
                 and concept not in missed_concepts
             ):
                 if score >= 7:
-                    correct_concepts.append(
-                        concept
-                    )
+                    correct_concepts.append(concept)
                 else:
-                    missed_concepts.append(
-                        concept
-                    )
+                    missed_concepts.append(concept)
 
             misconception_severity = None
 
             if grading.get("misconception"):
                 misconception_severity = (
-                    grading["misconception"].get(
-                        "severity"
-                    )
+                    grading["misconception"].get("severity")
                 )
 
-            update_learner_state(
-                session_id,
-                correct_concepts,
-                missed_concepts,
-                score,
-                misconception_severity
+            mastery_result = update_mastery_from_assessment(
+                session_id=session_id,
+                concept=concept,
+                score=score,
+                correct=score >= 7,
+                misconception_severity=misconception_severity,
             )
+
+            grading["mastery_update"] = mastery_result
+
+            misconception = grading.get("misconception")
+
+            if misconception and isinstance(misconception, dict):
+                record_misconception(
+                    session_id=session_id,
+                    concept=concept,
+                    severity=misconception.get("severity", "medium"),
+                    misconception=misconception.get(
+                        "misconception",
+                        "unspecified_misconception",
+                    ),
+                    evidence=misconception.get("evidence"),
+                    suggested_intervention=misconception.get(
+                        "suggested_intervention"
+                    ),
+                )
+
+            if is_reassessment and score >= 7:
+                resolve_misconceptions(
+                    session_id=session_id,
+                    concept=concept,
+                )
 
             if confidence_rating is not None:
                 record_metacognitive_checkin(
@@ -398,8 +458,9 @@ def save_metacognitive_checkin():
     concept = data.get("concept", "")
     confidence_rating = data.get("confidence_rating")
 
-    if not session_id or not concept or confidence_rating is None:
+    if not session_id or confidence_rating is None:
         return json_error("Missing metacognitive check-in data.")
+    concept = concept or "general"
 
     valid, error = validate_session_id(session_id)
     if not valid:

@@ -1,6 +1,6 @@
-import { useState, useRef } from 'react'
+import React, { useState, useRef } from 'react'
 import { UploadCloud, Video as Youtube, File as FileIcon, X } from 'lucide-react'
-import { uploadFile, uploadYouTube } from '../../lib/api'
+import { uploadFile, uploadYouTube, getTaskStatus } from '../../lib/api'
 import { toast } from 'sonner'
 import { motion } from 'framer-motion'
 
@@ -63,32 +63,76 @@ export function FileUploader({ onSuccess }: { onSuccess: (sessionId: string) => 
   }
 
   const handleUpload = async () => {
-    if (tab === 'file' && !file) return
-    if (tab === 'youtube' && !youtubeUrl) return
+  if (tab === 'file' && !file) return
+  if (tab === 'youtube' && !youtubeUrl) return
 
-    setIsUploading(true)
-    const progInt = simulateProgress()
-    
-    try {
-      let res
-      if (tab === 'file') {
-        res = await uploadFile(file!)
-      } else {
-        res = await uploadYouTube(youtubeUrl)
+  setIsUploading(true)
+  const progInt = simulateProgress()
+
+  try {
+    let res
+
+if (tab === 'file') {
+  res = await uploadFile(file!)
+} else {
+  res = await uploadYouTube(youtubeUrl)
+}
+
+clearInterval(progInt)
+
+let taskResult = res
+
+if (res.task_id) {
+  let attempts = 0
+  const maxAttempts = 300
+
+  while (attempts < maxAttempts) {
+    const status = await getTaskStatus(res.task_id)
+
+    if (status.state === 'success') {
+      taskResult = {
+        ...res,
+        ...(status.result || {})
       }
-      clearInterval(progInt)
-      setProgress(100)
-      toast.success('Ready to study!')
-      
-      setTimeout(() => onSuccess(res.session_id), 500)
-    } catch (err: unknown) {
-      clearInterval(progInt)
-      setProgress(0)
-      const message = err instanceof Error ? err.message : 'Upload failed'
-      toast.error(message)
-      setIsUploading(false)
+      break
     }
+
+    if (status.state === 'failure') {
+      throw new Error(status.error || 'File processing failed')
+    }
+
+    await new Promise(resolve => setTimeout(resolve, 1000))
+    attempts++
   }
+
+  if (attempts >= maxAttempts) {
+    throw new Error('File processing timed out')
+  }
+}
+
+setProgress(100)
+setIsUploading(false)
+
+toast.success('Ready to study!')
+
+const sessionId = taskResult.session_id
+
+if (!sessionId) {
+  throw new Error('Upload completed but no session ID was returned')
+}
+
+setTimeout(() => {
+  onSuccess(sessionId)
+}, 500)
+  } catch (err: unknown) {
+    clearInterval(progInt)
+    setProgress(0)
+
+    const message = err instanceof Error ? err.message : 'Upload failed'
+    toast.error(message)
+    setIsUploading(false)
+  }
+}
 
   return (
     <div className="w-full max-w-2xl mx-auto rounded-[var(--radius-lg)] bg-[var(--bg-surface)] border border-[var(--border)] overflow-hidden">

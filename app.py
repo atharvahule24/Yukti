@@ -219,6 +219,15 @@ def api_chat():
         }
     )
 
+@app.route("/api/health", methods=["GET"])
+def health_check():
+    return jsonify({
+        "status": "ok",
+        "message": "Yukti backend is running"
+    })
+
 if __name__ == '__main__':
     debug = os.getenv("DEBUG", "false").lower() == "true"
     app.run(debug=True, use_reloader=False)
+
+

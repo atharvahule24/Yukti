@@ -1,9 +1,30 @@
 import json
 from flask import Blueprint, request, Response, stream_with_context, jsonify
 from agents.rag_workflow import RagWorkflow
+from db import get_history
 
 chat_bp = Blueprint('chat', __name__)
 rag_workflow = RagWorkflow()
+
+@chat_bp.route('/chat/history/<session_id>', methods=['GET'])
+def chat_history(session_id):
+    try:
+        history = get_history(session_id, limit=50)
+
+        messages = [
+            {
+                "id": f"history-{i}",
+                "role": item["role"],
+                "content": item["content"]
+            }
+            for i, item in enumerate(history)
+            if item["role"] in {"user", "assistant"}
+        ]
+
+        return jsonify({"messages": messages})
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @chat_bp.route('/chat', methods=['GET'])
 def chat():

@@ -116,6 +116,24 @@ def init_db():
             """
         )        
 
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS misconceptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id TEXT NOT NULL,
+                concept TEXT NOT NULL,
+                misconception TEXT NOT NULL,
+                evidence TEXT,
+                severity TEXT NOT NULL DEFAULT 'medium',
+                suggested_intervention TEXT,
+                occurrences INTEGER NOT NULL DEFAULT 1,
+                resolved INTEGER NOT NULL DEFAULT 0,
+                first_detected TEXT NOT NULL,
+                last_detected TEXT NOT NULL,
+                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
+            )
+            """
+        )
 
 def _normalise_session(data: dict[str, Any]) -> dict[str, Any]:
     session_id = data.get("id") or data.get("session_id")
@@ -188,6 +206,8 @@ def delete_session_data(session_id: str):
         conn.execute("DELETE FROM progress WHERE session_id=?", (session_id,))
         conn.execute("DELETE FROM card_schedule WHERE session_id=?", (session_id,))
         conn.execute("DELETE FROM sessions WHERE session_id=?", (session_id,))
+        conn.execute("DELETE FROM misconceptions WHERE session_id=?",(session_id,),
+)        
 
 
 def save_message(session_id: str, role: str, content: str, created_at: str):
@@ -408,19 +428,25 @@ def update_learner_state(
                     ),
                 )
 
-
 def record_misconception(
     session_id: str,
     concept: str,
     severity: str,
+    misconception: str | None = None,
+    evidence: str | None = None,
+    suggested_intervention: str | None = None,
 ):
     """
-    Update learner state when a misconception is detected.
+    Update learner state and persist the detected misconception.
     """
 
     now = datetime.utcnow().isoformat()
 
     with get_conn() as conn:
+
+        # ---------------------------------------------------------
+        # 1. Update learner state
+        # ---------------------------------------------------------
         row = conn.execute(
             """
             SELECT
@@ -437,7 +463,7 @@ def record_misconception(
         if row:
             mastery = max(
                 0.0,
-                row["mastery"] - 10.0
+                row["mastery"] - 10.0,
             )
 
             confidence_drop = {
@@ -448,7 +474,7 @@ def record_misconception(
 
             confidence = max(
                 0.0,
-                row["confidence"] - confidence_drop
+                row["confidence"] - confidence_drop,
             )
 
             conn.execute(
@@ -500,6 +526,139 @@ def record_misconception(
                     now,
                 ),
             )
+
+        # ---------------------------------------------------------
+        # 2. Persist misconception history
+        # ---------------------------------------------------------
+        existing = None
+
+        if misconception:
+            existing = conn.execute(
+                """
+                SELECT id, occurrences
+                FROM misconceptions
+                WHERE session_id=?
+                  AND LOWER(concept)=LOWER(?)
+                  AND LOWER(misconception)=LOWER(?)
+                  AND resolved=0
+                ORDER BY id DESC
+                LIMIT 1
+                """,
+                (
+                    session_id,
+                    concept,
+                    misconception,
+                ),
+            ).fetchone()
+
+        if existing:
+            conn.execute(
+                """
+                UPDATE misconceptions
+                SET occurrences=?,
+                    severity=?,
+                    evidence=?,
+                    suggested_intervention=?,
+                    last_detected=?,
+                    resolved=0
+                WHERE id=?
+                """,
+                (
+                    existing["occurrences"] + 1,
+                    severity,
+                    evidence,
+                    suggested_intervention,
+                    now,
+                    existing["id"],
+                ),
+            )
+
+        else:
+            conn.execute(
+                """
+                INSERT INTO misconceptions (
+                    session_id,
+                    concept,
+                    misconception,
+                    evidence,
+                    severity,
+                    suggested_intervention,
+                    occurrences,
+                    resolved,
+                    first_detected,
+                    last_detected
+                )
+                VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
+                """,
+                (
+                    session_id,
+                    concept,
+                    misconception or "unspecified_misconception",
+                    evidence,
+                    severity,
+                    suggested_intervention,
+                    now,
+                    now,
+                ),
+            )
+
+
+def get_active_misconceptions(
+    session_id: str,
+    concept: str | None = None,
+) -> list[dict]:
+    """
+    Return unresolved misconceptions for a learner.
+    """
+
+    with get_conn() as conn:
+        if concept:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM misconceptions
+                WHERE session_id=?
+                  AND LOWER(concept)=LOWER(?)
+                  AND resolved=0
+                ORDER BY occurrences DESC, last_detected DESC
+                """,
+                (session_id, concept),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM misconceptions
+                WHERE session_id=?
+                  AND resolved=0
+                ORDER BY occurrences DESC, last_detected DESC
+                """,
+                (session_id,),
+            ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def resolve_misconceptions(
+    session_id: str,
+    concept: str,
+):
+    """
+    Mark active misconceptions for a concept as resolved
+    after successful reassessment.
+    """
+
+    with get_conn() as conn:
+        conn.execute(
+            """
+            UPDATE misconceptions
+            SET resolved=1
+            WHERE session_id=?
+              AND LOWER(concept)=LOWER(?)
+              AND resolved=0
+            """,
+            (session_id, concept),
+        )
 
 def get_learner_state(session_id: str) -> list[dict]:
     with get_conn() as conn:

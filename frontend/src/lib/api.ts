@@ -99,23 +99,57 @@ async function handleResponse<T>(response: Response): Promise<T> {
   return response.json();
 }
 
-export async function uploadFile(file: File): Promise<{session_id: string, title: string, chunk_count: number}> {
+export async function checkBackendHealth(): Promise<{
+  status: string;
+  version?: string;
+  message?: string;
+}> {
+  const response = await fetch(`${BASE_URL}/health`);
+  return handleResponse(response);
+}
+
+export async function uploadFile(file: File): Promise<{
+  session_id?: string;
+  title?: string;
+  chunk_count?: number;
+  task_id?: string;
+}> {
   const formData = new FormData();
   formData.append('file', file);
-  
+
   const response = await fetch(`${BASE_URL}/upload`, {
     method: 'POST',
     body: formData,
   });
+
   return handleResponse(response);
 }
 
-export async function uploadYouTube(url: string): Promise<{session_id: string, title: string, chunk_count: number}> {
+export async function getTaskStatus(taskId: string): Promise<{
+  state: string;
+  result?: {
+    status?: string
+    session_id?: string
+    chunk_count?: number
+  };
+  error?: string;
+}> {
+  const response = await fetch(`${BASE_URL}/task/${taskId}`)
+  return handleResponse(response)
+}
+
+export async function uploadYouTube(url: string): Promise<{
+  task_id?: string;
+  session_id?: string;
+  title?: string;
+  chunk_count?: number;
+}> {
   const response = await fetch(`${BASE_URL}/upload`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ youtube_url: url }),
   });
+
   return handleResponse(response);
 }
 
@@ -167,6 +201,17 @@ export function streamChat(
       onCitations?.([]);
     }
   });
+}
+
+export async function getChatHistory(sessionId: string): Promise<{
+  messages: Array<{
+    id: string
+    role: 'user' | 'assistant'
+    content: string
+  }>
+}> {
+  const response = await fetch(`${BASE_URL}/chat/history/${sessionId}`)
+  return handleResponse(response)
 }
 
 export async function getGraph(sessionId: string): Promise<{nodes: Node[], links: Link[]}> {
@@ -255,9 +300,15 @@ export async function getNotes(sessionId: string): Promise<NotesResponse> {
   return handleResponse(response);
 }
 
-export async function generateNotes(sessionId: string): Promise<NotesResponse> {
-  const response = await fetch(`${BASE_URL}/notes/generate/${sessionId}`, { method: 'POST' });
-  return handleResponse(response);
+export async function generateNotes(sessionId: string): Promise<{
+  task_id: string
+  status: string
+}> {
+  const response = await fetch(`${BASE_URL}/notes/generate/${sessionId}`, {
+    method: 'POST',
+  })
+
+  return handleResponse(response)
 }
 
 export async function getSessions(): Promise<{sessions: Session[]}> {
