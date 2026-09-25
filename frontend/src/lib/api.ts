@@ -46,6 +46,7 @@ export interface LearningPath {
   mastery?: number;
   confidence?: number;
   difficulty: 'easy' | 'medium' | 'hard' | string;
+  misconception?: string;
 }
 
 export interface GradeResult {
@@ -54,6 +55,7 @@ export interface GradeResult {
   correct_concepts: string[];
   missed_concepts: string[];
   study_tip?: string;
+  misconception?: string | null;
   learning_path?: LearningPath;
 }
 
@@ -162,45 +164,73 @@ export function streamChat(
   onError: (err: string) => void,
   onCitations?: (citations: Citation[]) => void
 ): void {
-  const url = new URL(`${BASE_URL}/chat`, window.location.href);
-  url.searchParams.append('message', message);
-  url.searchParams.append('session_id', sessionId);
-  url.searchParams.append('mode', mode);
+  const url = new URL(`${BASE_URL}/chat`, window.location.href)
 
-  const eventSource = new EventSource(url.toString());
+  url.searchParams.append('message', message)
+  url.searchParams.append('session_id', sessionId)
+  url.searchParams.append('mode', mode)
+
+  console.log('STREAM CHAT START')
+  console.log('BASE_URL:', BASE_URL)
+  console.log('CHAT URL:', url.toString())
+
+  let eventSource: EventSource
+
+  try {
+    eventSource = new EventSource(url.toString())
+    console.log('EVENTSOURCE CREATED')
+  } catch (error) {
+    console.error('EVENTSOURCE CREATION FAILED:', error)
+    onError('Failed to create chat connection')
+    return
+  }
+
+  eventSource.onopen = () => {
+    console.log('EVENTSOURCE OPENED')
+  }
 
   eventSource.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data);
-      if (data.error) {
-        onError(data.error);
-        eventSource.close();
-        return;
-      }
-      if (data.done) {
-        onDone();
-        eventSource.close();
-      } else if (data.token) {
-        onToken(data.token);
-      }
-    } catch {
-      onError('Failed to parse SSE data');
-      eventSource.close();
-    }
-  };
+    console.log('SSE MESSAGE:', event.data)
 
-  eventSource.onerror = () => {
-    onError('Connection lost');
-    eventSource.close();
-  };
+    try {
+      const data = JSON.parse(event.data)
+
+      if (data.error) {
+        console.error('SSE ERROR:', data.error)
+        onError(data.error)
+        eventSource.close()
+        return
+      }
+
+      if (data.done) {
+        console.log('SSE DONE')
+        onDone()
+        eventSource.close()
+      } else if (data.token) {
+        onToken(data.token)
+      }
+    } catch (error) {
+      console.error('SSE PARSE ERROR:', error)
+      onError('Failed to parse SSE data')
+      eventSource.close()
+    }
+  }
+
+  eventSource.onerror = (error) => {
+    console.error('EVENTSOURCE ERROR:', error)
+    onError('Connection lost')
+    eventSource.close()
+  }
 
   eventSource.addEventListener('citations', (event) => {
+    console.log('SSE CITATIONS:', event)
+
     try {
-      onCitations?.(JSON.parse(event.data));
+      onCitations?.(JSON.parse((event as MessageEvent).data))
     } catch {
-      onCitations?.([]);
+      onCitations?.([])
     }
-  });
+  })
 }
 
 export async function getChatHistory(sessionId: string): Promise<{
@@ -270,11 +300,38 @@ export async function generateReassessment(
   return handleResponse(response);
 }
 
-export async function gradeAnswer(question: string, userAnswer: string, sampleAnswer: string, sessionId?: string, concept?: string,confidenceRating?: number,isReassessment?: boolean): Promise<GradeResult> {  const response = await fetch(`${BASE_URL}/quiz/grade`, {
+export async function gradeAnswer(question: string, userAnswer: string, sampleAnswer: string, sessionId?: string, concept?: string, confidenceRating?: number, isReassessment?: boolean): Promise<GradeResult> {  const response = await fetch(`${BASE_URL}/quiz/grade`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
 body: JSON.stringify({ question, user_answer: userAnswer, sample_answer: sampleAnswer, session_id: sessionId, concept, confidence_rating: confidenceRating, is_reassessment: isReassessment }),  });
   return handleResponse(response);
+}
+
+
+
+export async function gradeInterventionAnswer(
+  sessionId: string,
+  concept: string,
+  question: string,
+  userAnswer: string,
+): Promise<GradeResult & {
+  resolved?: boolean
+  misconception?: string | null
+}> {
+  const response = await fetch(`${BASE_URL}/quiz/intervention-grade`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      session_id: sessionId,
+      concept,
+      question,
+      user_answer: userAnswer,
+    }),
+  })
+
+  return handleResponse(response)
 }
 
 export async function recordMetacognitiveCheckin(

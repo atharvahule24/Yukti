@@ -2,9 +2,15 @@ from agents.adaptive_question_engine import get_adaptive_question_plan
 from agents.path_optimizer import optimize_learning_path
 
 
-def get_next_learning_action(session_id: str, concept: str | None = None) -> dict:
+def get_next_learning_action(
+    session_id: str,
+    concept: str | None = None,
+) -> dict:
     """
     Central coordinator for the adaptive learning loop.
+
+    The orchestrator calculates the learning path once and passes that
+    decision into the adaptive question engine.
     """
 
     learning_path = optimize_learning_path(
@@ -15,6 +21,7 @@ def get_next_learning_action(session_id: str, concept: str | None = None) -> dic
     question_plan = get_adaptive_question_plan(
         session_id=session_id,
         concept=concept,
+        learning_path=learning_path,
     )
 
     return {

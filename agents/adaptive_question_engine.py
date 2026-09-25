@@ -1,20 +1,25 @@
-from db import get_learner_state, get_active_misconceptions
-from agents.path_optimizer import optimize_learning_path
+from db import get_active_misconceptions
 
 
 def get_adaptive_question_plan(
     session_id: str,
     concept: str | None = None,
+    learning_path: dict | None = None,
 ) -> dict:
     """
-    Decide what kind of question the learner should receive next
-    based on learner state, misconceptions, and the path optimizer.
+    Decide what kind of question the learner should receive next.
+
+    If a learning_path is supplied by the orchestrator, reuse it instead
+    of calculating the path again.
     """
 
-    learning_path = optimize_learning_path(
-        session_id=session_id,
-        current_concept=concept,
-    )
+    if learning_path is None:
+        from agents.path_optimizer import optimize_learning_path
+
+        learning_path = optimize_learning_path(
+            session_id=session_id,
+            current_concept=concept,
+        )
 
     target_concept = learning_path.get("concept") or concept
 
@@ -33,12 +38,16 @@ def get_adaptive_question_plan(
     )
 
     # ---------------------------------------------------------
-    # Repeated misconception → targeted conceptual question
+    # Unresolved misconception → targeted correction
     # ---------------------------------------------------------
     if misconceptions:
         misconception = max(
             misconceptions,
-            key=lambda item: item["occurrences"],
+            key=lambda item: (
+                item["occurrences"],
+                item["severity"] == "high",
+                item["severity"] == "medium",
+            ),
         )
 
         return {
@@ -49,16 +58,43 @@ def get_adaptive_question_plan(
             "misconception": misconception["misconception"],
             "evidence": misconception["evidence"],
             "severity": misconception["severity"],
+            "suggested_intervention": misconception.get(
+                "suggested_intervention"
+            ),
+            "occurrences": misconception.get("occurrences", 1),
             "reason": (
                 "The learner has an unresolved misconception. "
-                "The next question should directly test that "
-                "misunderstanding."
+                "The next question should directly test that misunderstanding."
             ),
+        }
+
+        if learning_path["action"] == "prerequisite_review":
+            return {
+            "concept": learning_path["concept"],
+            "difficulty": learning_path.get("difficulty", "easy"),
+            "target": "prerequisite",
+            "question_type": "conceptual",
+            "reason": learning_path["reason"],
+            "target_concept": learning_path.get("target_concept"),
         }
 
     # ---------------------------------------------------------
     # Step-by-step support
     # ---------------------------------------------------------
+
+    if learning_path["action"] == "prerequisite_review":
+        return {
+        "concept": learning_path["concept"],
+        "difficulty": learning_path.get("difficulty", "easy"),
+        "target": "prerequisite",
+        "question_type": "conceptual",
+        "target_concept": learning_path.get("target_concept"),
+        "reason": learning_path.get(
+            "reason",
+            "A prerequisite concept needs strengthening before continuing."
+        ),
+    }
+
     if learning_path["action"] == "step_by_step_review":
         return {
             "concept": target_concept,

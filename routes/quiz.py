@@ -489,3 +489,135 @@ def save_metacognitive_checkin():
         "success": True,
         "learning_path": learning_path,
     })
+
+@quiz_bp.route('/quiz/intervention-grade', methods=['POST'])
+def grade_intervention_answer():
+    """
+    Grade the learner's answer to a checking question inside an
+    adaptive intervention, then feed the result back into learner state.
+    """
+    data, parse_error = parse_json_request(request)
+    if parse_error:
+        return json_error(parse_error)
+
+    session_id = data.get("session_id", "")
+    concept_input = data.get("concept", "")
+    question = data.get("question", "")
+    user_answer = data.get("user_answer", "")
+    misconception = data.get("misconception")
+
+    if not session_id or not question or not user_answer:
+        return json_error("session_id, question and user_answer are required")
+
+    valid, error = validate_session_id(session_id)
+    if not valid:
+        return json_error(error)
+
+    session_data = session_store.get(session_id, {})
+    context = session_data.get("full_text", "")
+
+    concept = get_canonical_concept(concept_input or "general")
+
+    grading_prompt = f"""
+You are evaluating a student's answer to a checking question
+inside an adaptive learning intervention.
+
+Concept: {concept}
+
+Original learning context:
+{context[:12000]}
+
+Checking question:
+{question}
+
+Student answer:
+{user_answer}
+
+Evaluate whether the student now demonstrates the concept correctly.
+
+Return ONLY valid JSON:
+{{
+  "score": 0,
+  "correct": false,
+  "feedback": "specific explanation",
+  "misconception": "the remaining misunderstanding, or null",
+  "severity": "low",
+  "study_tip": "one specific next step"
+}}
+
+Scoring:
+8-10 = concept is demonstrated correctly
+7 = acceptable understanding with minor gaps
+4-6 = partial understanding / important misconception remains
+0-3 = incorrect understanding
+
+Be strict about the actual concept. Do not give credit merely because
+the student used relevant terminology.
+"""
+
+    try:
+        generator = Generator(json_mode=True)
+
+        result = generator.chain.invoke({
+            "context": context[:12000],
+            "question": grading_prompt,
+        })
+
+        grading = extract_json(result)
+
+        if not grading:
+            return jsonify({
+                "error": "intervention_grading_failed"
+            }), 500
+
+        score = float(grading.get("score", 0))
+        correct = bool(grading.get("correct", score >= 7))
+        severity = grading.get("severity") or "medium"
+        detected_misconception = grading.get("misconception")
+
+        # Update learner mastery exactly once.
+        update_mastery_from_assessment(
+            session_id=session_id,
+            concept=concept,
+            score=score,
+            correct=correct,
+            misconception_severity=(
+                None if correct else severity
+            ),
+        )
+
+        # Successful intervention = resolve the active misconception.
+        if correct and score >= 7:
+            resolve_misconceptions(session_id, concept)
+
+        # Failed intervention = retain/update misconception memory.
+        elif detected_misconception:
+            record_misconception(
+                session_id=session_id,
+                concept=concept,
+                severity=severity,
+                misconception=detected_misconception,
+                evidence=grading.get("feedback"),
+                suggested_intervention=grading.get("study_tip"),
+            )
+
+        learning_path = optimize_learning_path(
+            session_id=session_id,
+            current_concept=concept,
+        )
+
+        return jsonify({
+            "score": score,
+            "correct": correct,
+            "feedback": grading.get("feedback", ""),
+            "study_tip": grading.get("study_tip", ""),
+            "misconception": detected_misconception,
+            "learning_path": learning_path,
+            "resolved": bool(correct and score >= 7),
+        })
+
+    except Exception as e:
+        return jsonify({
+            "error": "intervention_grading_failed",
+            "message": str(e),
+        }), 500

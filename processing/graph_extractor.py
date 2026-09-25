@@ -1,6 +1,5 @@
 import os
 import json
-import random
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
@@ -16,7 +15,13 @@ class Node(BaseModel):
 class Edge(BaseModel):
     source: str = Field(description="The id of the source node")
     target: str = Field(description="The id of the target node")
-    label: str = Field(description="The relationship between the nodes (e.g., includes, requires, relates to)")
+    label: str = Field(
+        description=(
+            "Relationship type. Use exactly one of: "
+            "requires, includes, related_to, applied_in, "
+            "defines, part_of"
+        )
+    )
 
 class KnowledgeGraphSchema(BaseModel):
     nodes: List[Node] = Field(description="List of key concept nodes")
@@ -26,19 +31,50 @@ def extract_knowledge_graph(chunks, file_path="knowledge_graph.json"):
     parser = JsonOutputParser(pydantic_object=KnowledgeGraphSchema)
 
     prompt = PromptTemplate(
-        template="""You are an expert educational graph extractor.
-Given the following text, extract a hierarchical learning route consisting of key concepts as nodes, and relationships between them as edges.
-Structure the graph starting from the most general or fundamental concept (the root), and branch out to its characteristics, types, explaining different models, and then solutions or specific details. This should feel like a clear route from start to finish to learn the topic.
-Extract up to 8 nodes and their corresponding edges from this text chunk.
+    template="""You are an expert educational graph extractor.
+
+Given the following educational text, extract the key learning concepts
+and the meaningful relationships between them.
+
+Organize concepts from broader concepts to more specific concepts when
+the text supports such a structure. Do not invent concepts or
+relationships that are not supported by the text.
+
+Extract up to 12 meaningful nodes and their corresponding edges from
+this text chunk.
+
 Be concise. Ensure output format is strictly JSON following the schema.
 {format_instructions}
+
+Use only these relationship labels:
+
+- requires: target concept is a prerequisite for source concept
+- includes: source contains target as a sub-concept
+- related_to: concepts are conceptually related
+- applied_in: source is used in target/application
+- defines: source defines target
+- part_of: source is a component of target
+
+For "requires", always set:
+source = the concept that needs the prerequisite
+target = the prerequisite concept
+
+Example:
+source: "quadratic equations"
+target: "algebraic equations"
+label: "requires"
+
+For prerequisite relationships, prefer "requires".
+Do not invent relationship labels.
 
 Text:
 {text}
 """,
-        input_variables=["text"],
-        partial_variables={"format_instructions": parser.get_format_instructions()},
-    )
+    input_variables=["text"],
+    partial_variables={
+        "format_instructions": parser.get_format_instructions()
+    },
+)
     
     groq_api_key = os.environ.get("GROQ_API_KEY")
     if not groq_api_key:
@@ -50,7 +86,6 @@ Text:
         temperature=0.1,
         max_tokens=1024,
         api_key=groq_api_key,
-        model_kwargs={"response_format": {"type": "json_object"}}
     )
     
     chain = prompt | model | parser
@@ -71,23 +106,42 @@ Text:
                     print(f"Chunk graph extraction failed: {exc}")
                     continue
                 for node in partial_graph.get("nodes", []):
-                    all_nodes[node["id"]] = node
+                    node_id = str(node.get("id", "")).strip()
+                    label = str(node.get("label", "")).strip()
+
+                    if not node_id or not label:
+                        continue
+
+                    node["id"] = node_id
+                    node["label"] = label
+                    all_nodes[node_id] = node
                 all_edges.extend(partial_graph.get("edges", []))
 
-        seen_edges = set()
-        unique_edges = []
-        for edge in all_edges:
-            key = (edge.get("source"), edge.get("target"))
-            if key not in seen_edges:
-                seen_edges.add(key)
-                unique_edges.append(edge)
+                seen_edges = set()
+                unique_edges = []
+
+                for edge in all_edges:
+                    source = str(edge.get("source", "")).strip()
+                    target = str(edge.get("target", "")).strip()
+                    label = str(edge.get("label", "")).strip()
+
+                    if not source or not target or not label:
+                        continue
+
+                    if source not in all_nodes or target not in all_nodes:
+                        continue
+
+                    key = (source, target, label)
+
+                    if key not in seen_edges:
+                        seen_edges.add(key)
+                        unique_edges.append({
+                            "source": source,
+                            "target": target,
+                            "label": label,
+                        })
 
         new_graph = {"nodes": list(all_nodes.values()), "edges": unique_edges}
-        
-        # Give them random mastery 0-100 just for UI
-        for node in new_graph.get("nodes", []):
-            if "mastery" not in node:
-                node["mastery"] = random.randint(0, 50)
                 
         # Merge with existing
         merge_graph(file_path, new_graph)

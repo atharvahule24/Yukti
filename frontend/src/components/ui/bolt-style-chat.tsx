@@ -5,7 +5,7 @@ import { ModeSelector } from './mode-selector'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { toast } from 'sonner'
-
+import { gradeInterventionAnswer } from '../../lib/api'
 type MarkdownChildren = {
   children?: ReactNode
 }
@@ -234,6 +234,14 @@ function CopyButton({ text }: { text: string }) {
 export function ChatInterface({ sessionId }: { sessionId: string }) {
   const { messages, isLoading, currentMode, setCurrentMode, sendMessage } = useChat()
   const [input, setInput] = useState('')
+  const [intervention, setIntervention] = useState<{
+  concept: string
+  question?: string
+  misconception?: string
+} | null>(null)
+
+const [awaitingInterventionAnswer, setAwaitingInterventionAnswer] = useState(false)
+const [interventionQuestion, setInterventionQuestion] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const scrollToBottom = () => {
@@ -245,31 +253,119 @@ export function ChatInterface({ sessionId }: { sessionId: string }) {
   }, [messages])
 
   useEffect(() => {
-    const handleAsk = (e: Event) => {
-      const detail = e instanceof CustomEvent ? e.detail : undefined
+  if (!intervention || isLoading) return
 
-if (detail && !isLoading) {
-  if (typeof detail === 'string') {
-    sendMessage(detail, sessionId, currentMode)
-  } else {
-    sendMessage(
-      detail.prompt,
-      sessionId,
-      detail.teachingMode || currentMode
+  const latestAssistantMessage = [...messages]
+    .reverse()
+    .find(
+      (message) =>
+        message.role === 'assistant' &&
+        !message.streaming &&
+        message.content.trim()
     )
+
+  if (!latestAssistantMessage) return
+
+  const match = latestAssistantMessage.content.match(
+  /Checking question:?\s*(.+)/i
+)
+
+  if (match?.[1]) {
+    setInterventionQuestion(match[1].trim())
+    setAwaitingInterventionAnswer(true)
   }
+}, [messages, isLoading, intervention])
+
+  useEffect(() => {
+const handleAsk = (e: Event) => {
+  const detail = e instanceof CustomEvent ? e.detail : undefined
+
+  console.log('YUKTI ASK EVENT:', detail)
+
+  if (!detail || isLoading) return
+
+  const prompt =
+    typeof detail === 'string'
+      ? detail
+      : detail.prompt
+
+  const teachingMode =
+    typeof detail === 'string'
+      ? currentMode
+      : detail.teachingMode || currentMode
+
+  console.log('SENDING INTERVENTION PROMPT:', {
+    prompt,
+    sessionId,
+    teachingMode,
+  })
+
+  if (!prompt) return
+
+  if (typeof detail !== 'string' && detail.intervention) {
+    setIntervention({
+      concept: detail.concept || 'general',
+      misconception: detail.misconception,
+    })
+
+    setAwaitingInterventionAnswer(false)
+    setInterventionQuestion('')
+  }
+
+  console.log('HANDLE ASK → SEND MESSAGE', {
+  prompt,
+  sessionId,
+  teachingMode,
+})
+
+  sendMessage(prompt, sessionId, teachingMode)
 }
-    }
     window.addEventListener('yukti:ask', handleAsk)
     return () => window.removeEventListener('yukti:ask', handleAsk)
   }, [isLoading, sessionId, currentMode, sendMessage])
 
-  const handleSend = () => {
-    if (input.trim() && !isLoading) {
-      sendMessage(input, sessionId, currentMode)
-      setInput('')
+const handleSend = async () => {
+  const answer = input.trim()
+
+  if (!answer || isLoading) return
+
+  sendMessage(answer, sessionId, currentMode)
+  setInput('')
+
+  if (intervention && awaitingInterventionAnswer && interventionQuestion) {
+    try {
+      const result = await gradeInterventionAnswer(
+        sessionId,
+        intervention.concept,
+        interventionQuestion || 'Explain your understanding of the concept.',
+        answer,
+      )
+
+      window.dispatchEvent(
+        new CustomEvent('yukti:intervention-result', {
+          detail: {
+            ...result,
+            concept: intervention.concept,
+          },
+        })
+      )
+
+      setAwaitingInterventionAnswer(false)
+
+      if (result.resolved) {
+        toast.success('Misconception resolved! Your learning path has been updated.')
+
+        setIntervention(null)
+        setAwaitingInterventionAnswer(false)
+      } else {
+        toast.info('The concept still needs a little more practice.')
+      }
+    } catch (error) {
+      console.error('Failed to grade intervention answer:', error)
+      toast.error('Could not evaluate the intervention answer.')
     }
   }
+}
 
   return (
     <div className="flex flex-col h-full w-full bg-[#13111c] rounded-xl overflow-hidden">

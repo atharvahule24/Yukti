@@ -3,7 +3,11 @@ from db import (
     get_latest_metacognitive_checkin,
     get_active_misconceptions,
 )
-from agents.concept_registry import get_canonical_concepts
+
+from agents.concept_registry import (
+    get_prerequisites,
+    get_canonical_concept,
+)
 
 
 def optimize_learning_path(
@@ -18,15 +22,19 @@ def optimize_learning_path(
             current_concept,
         )
 
-    states = get_learner_state(session_id)
+    # Keep ALL learner states available.
+    # We need them for prerequisite mastery lookup.
+    all_states = get_learner_state(session_id)
 
     # ---------------------------------------------------------
-    # 1. If we are working on a specific concept, focus on it.
+    # 1. Determine which state we are optimizing.
     # ---------------------------------------------------------
+    states = all_states
+
     if current_concept:
         current_states = [
             state
-            for state in states
+            for state in all_states
             if state["concept"].lower() == current_concept.lower()
         ]
 
@@ -34,18 +42,80 @@ def optimize_learning_path(
             states = current_states
 
     # ---------------------------------------------------------
-    # 2. No learner state yet -> start learning.
+    # 2. No learner state yet -> check prerequisites first.
     # ---------------------------------------------------------
-    if not states:
+    if not states and current_concept:
+        prerequisites = get_prerequisites(current_concept)
+
+        if prerequisites:
+            state_map = {
+                get_canonical_concept(item["concept"]): item
+                for item in all_states
+            }
+
+            weak_prerequisites = []
+
+            for prerequisite in prerequisites:
+                prerequisite_state = state_map.get(
+                    get_canonical_concept(prerequisite)
+                )
+
+                mastery = (
+                    prerequisite_state.get("mastery", 0)
+                    if prerequisite_state
+                    else 0
+                )
+
+                confidence = (
+                    prerequisite_state.get("confidence", 0)
+                    if prerequisite_state
+                    else 0
+                )
+
+                weak_prerequisites.append({
+                    "concept": prerequisite,
+                    "mastery": mastery,
+                    "confidence": confidence,
+                })
+
+            weak_prerequisites.sort(
+                key=lambda item: (
+                    item["mastery"],
+                    item["confidence"],
+                )
+            )
+
+            weakest_prerequisite = weak_prerequisites[0]
+
+            if weakest_prerequisite["mastery"] < 70:
+                return {
+                    "action": "prerequisite_review",
+                    "reason": (
+                        f"{current_concept} depends on "
+                        f"{weakest_prerequisite['concept']}, which currently "
+                        f"has {weakest_prerequisite['mastery']:.0f}% mastery. "
+                        "Strengthen the prerequisite before continuing."
+                    ),
+                    "concept": weakest_prerequisite["concept"],
+                    "target_concept": current_concept,
+                    "mastery": weakest_prerequisite["mastery"],
+                    "confidence": weakest_prerequisite["confidence"],
+                    "difficulty": (
+                        "easy"
+                        if weakest_prerequisite["mastery"] < 40
+                        else "medium"
+                    ),
+                }
+
         return {
             "action": "learn",
-            "reason": "No learner performance data available yet.",
+            "reason": "No learner performance data available for the requested concept yet.",
             "concept": current_concept,
             "difficulty": "medium",
         }
 
     # ---------------------------------------------------------
-    # 3. Find weakest concept.
+    # 3. Find weakest concept in the current learning scope.
     # ---------------------------------------------------------
     weakest_state = min(
         states,
@@ -97,7 +167,79 @@ def optimize_learning_path(
             }
 
     # ---------------------------------------------------------
-    # 5. Metacognitive signal:
+    # 5. Prerequisite-aware adaptation.
+    #
+    # IMPORTANT:
+    # Use ALL learner states here, not the filtered current
+    # concept states.
+    # ---------------------------------------------------------
+    if current_concept:
+        prerequisites = get_prerequisites(current_concept)
+
+        if prerequisites:
+            state_map = {
+                get_canonical_concept(item["concept"]): item
+                for item in all_states
+            }
+
+            weak_prerequisites = []
+
+            for prerequisite in prerequisites:
+                prerequisite_state = state_map.get(
+                    get_canonical_concept(prerequisite)
+                )
+
+                mastery = (
+                    prerequisite_state.get("mastery", 0)
+                    if prerequisite_state
+                    else 0
+                )
+
+                confidence = (
+                    prerequisite_state.get("confidence", 0)
+                    if prerequisite_state
+                    else 0
+                )
+
+                weak_prerequisites.append(
+                    {
+                        "concept": prerequisite,
+                        "mastery": mastery,
+                        "confidence": confidence,
+                    }
+                )
+
+            weak_prerequisites.sort(
+                key=lambda item: (
+                    item["mastery"],
+                    item["confidence"],
+                )
+            )
+
+            weakest_prerequisite = weak_prerequisites[0]
+
+            if weakest_prerequisite["mastery"] < 70:
+                return {
+                    "action": "prerequisite_review",
+                    "reason": (
+                        f"{current_concept} depends on "
+                        f"{weakest_prerequisite['concept']}, which currently "
+                        f"has {weakest_prerequisite['mastery']:.0f}% mastery. "
+                        "Strengthen the prerequisite before continuing."
+                    ),
+                    "concept": weakest_prerequisite["concept"],
+                    "target_concept": current_concept,
+                    "mastery": weakest_prerequisite["mastery"],
+                    "confidence": weakest_prerequisite["confidence"],
+                    "difficulty": (
+                        "easy"
+                        if weakest_prerequisite["mastery"] < 40
+                        else "medium"
+                    ),
+                }
+
+    # ---------------------------------------------------------
+    # 6. Metacognitive signal:
     # Low performance + high confidence can indicate a
     # misconception or misunderstanding.
     # ---------------------------------------------------------
@@ -120,7 +262,7 @@ def optimize_learning_path(
             }
 
         # -----------------------------------------------------
-        # 6. Low mastery + low confidence -> scaffolding.
+        # 7. Low mastery + low confidence -> scaffolding.
         # -----------------------------------------------------
         if (
             weakest_state["mastery"] < 50
@@ -139,7 +281,7 @@ def optimize_learning_path(
             }
 
         # -----------------------------------------------------
-        # 7. High performance + low confidence -> reinforce
+        # 8. High performance + low confidence -> reinforce
         # confidence rather than unnecessarily reteaching.
         # -----------------------------------------------------
         if (
@@ -160,7 +302,7 @@ def optimize_learning_path(
             }
 
     # ---------------------------------------------------------
-    # 8. Prioritize concepts that explicitly need support.
+    # 9. Prioritize concepts that explicitly need support.
     # ---------------------------------------------------------
     support_states = [
         state
@@ -183,7 +325,7 @@ def optimize_learning_path(
     confidence = weakest["confidence"]
 
     # ---------------------------------------------------------
-    # 9. Choose intervention based on learner state.
+    # 10. Choose intervention based on learner state.
     # ---------------------------------------------------------
     if weakest["needs_step_by_step"]:
         action = "step_by_step_review"

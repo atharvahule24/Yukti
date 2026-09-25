@@ -356,15 +356,6 @@ def update_learner_state(
                 0.10
                 )
 
-                confidence_drop = {
-                    "low": 0.05,
-                    "medium": 0.10,
-                    "high": 0.15,
-                }.get(
-                    misconception_severity,
-                    0.10
-                )
-
                 confidence = max(
                     0.0,
                     row["confidence"] - confidence_drop
@@ -437,7 +428,11 @@ def record_misconception(
     suggested_intervention: str | None = None,
 ):
     """
-    Update learner state and persist the detected misconception.
+    Persist a detected misconception without modifying learner mastery.
+
+    Mastery and confidence are updated centrally by
+    update_learner_state(). This function is responsible only for
+    misconception memory and recurrence tracking.
     """
 
     now = datetime.utcnow().isoformat()
@@ -445,90 +440,7 @@ def record_misconception(
     with get_conn() as conn:
 
         # ---------------------------------------------------------
-        # 1. Update learner state
-        # ---------------------------------------------------------
-        row = conn.execute(
-            """
-            SELECT
-                mastery,
-                confidence,
-                attempts,
-                correct_attempts
-            FROM learner_state
-            WHERE session_id=? AND concept=?
-            """,
-            (session_id, concept),
-        ).fetchone()
-
-        if row:
-            mastery = max(
-                0.0,
-                row["mastery"] - 10.0,
-            )
-
-            confidence_drop = {
-                "low": 0.05,
-                "medium": 0.10,
-                "high": 0.15,
-            }.get(severity, 0.10)
-
-            confidence = max(
-                0.0,
-                row["confidence"] - confidence_drop,
-            )
-
-            conn.execute(
-                """
-                UPDATE learner_state
-                SET mastery=?,
-                    confidence=?,
-                    needs_examples=1,
-                    needs_step_by_step=1,
-                    updated_at=?
-                WHERE session_id=? AND concept=?
-                """,
-                (
-                    mastery,
-                    confidence,
-                    now,
-                    session_id,
-                    concept,
-                ),
-            )
-
-        else:
-            confidence = {
-                "low": 0.45,
-                "medium": 0.40,
-                "high": 0.35,
-            }.get(severity, 0.40)
-
-            conn.execute(
-                """
-                INSERT INTO learner_state (
-                    session_id,
-                    concept,
-                    mastery,
-                    confidence,
-                    attempts,
-                    correct_attempts,
-                    recent_score,
-                    needs_examples,
-                    needs_step_by_step,
-                    updated_at
-                )
-                VALUES (?, ?, 0.0, ?, 1, 0, 0.0, 1, 1, ?)
-                """,
-                (
-                    session_id,
-                    concept,
-                    confidence,
-                    now,
-                ),
-            )
-
-        # ---------------------------------------------------------
-        # 2. Persist misconception history
+        # Persist / update misconception history
         # ---------------------------------------------------------
         existing = None
 
@@ -601,7 +513,6 @@ def record_misconception(
                     now,
                 ),
             )
-
 
 def get_active_misconceptions(
     session_id: str,
