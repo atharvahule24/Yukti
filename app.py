@@ -20,6 +20,7 @@ from routes.quiz import quiz_bp
 from routes.notes import notes_bp
 from routes.sessions import sessions_bp
 from routes.fact import fact_bp
+from routes.learner import learner_bp
 
 from celery_app import celery
 
@@ -40,7 +41,7 @@ app.register_blueprint(quiz_bp, url_prefix='/api')
 app.register_blueprint(notes_bp, url_prefix='/api')
 app.register_blueprint(sessions_bp, url_prefix='/api')
 app.register_blueprint(fact_bp, url_prefix='/api')
-
+app.register_blueprint(learner_bp, url_prefix='/api')
 @app.errorhandler(Exception)
 def handle_exception(e):
     return jsonify({"error": "server_error", "message": str(e)}), 500

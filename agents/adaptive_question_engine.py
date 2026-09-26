@@ -68,15 +68,15 @@ def get_adaptive_question_plan(
             ),
         }
 
-        if learning_path["action"] == "prerequisite_review":
-            return {
-            "concept": learning_path["concept"],
-            "difficulty": learning_path.get("difficulty", "easy"),
-            "target": "prerequisite",
-            "question_type": "conceptual",
-            "reason": learning_path["reason"],
-            "target_concept": learning_path.get("target_concept"),
-        }
+    if learning_path["action"] == "prerequisite_review":
+        return {
+        "concept": learning_path["concept"],
+        "difficulty": learning_path.get("difficulty", "easy"),
+        "target": "prerequisite",
+        "question_type": "conceptual",
+        "reason": learning_path["reason"],
+        "target_concept": learning_path.get("target_concept"),
+    }
 
     # ---------------------------------------------------------
     # Step-by-step support
@@ -114,6 +114,18 @@ def get_adaptive_question_plan(
             "target": "example_application",
             "question_type": "application",
             "reason": learning_path["reason"],
+        }
+
+    if learning_path["action"] == "spaced_review":
+        return {
+        "concept": learning_path["concept"],
+        "difficulty": learning_path.get("difficulty", "medium"),
+        "target": "retention",
+        "question_type": "recall",
+        "reason": learning_path.get(
+            "reason",
+            "This concept is due for a retention review.",
+        ),
         }
 
     # ---------------------------------------------------------

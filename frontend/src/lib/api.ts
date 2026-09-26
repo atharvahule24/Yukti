@@ -373,6 +373,103 @@ export async function getSessions(): Promise<{sessions: Session[]}> {
   return handleResponse(response);
 }
 
+export interface LearnerAnalytics {
+  overall_mastery: number
+  average_confidence: number
+  total_concepts: number
+  mastered_concepts: number
+  weak_concepts: number
+  due_reviews: number
+  active_misconceptions: number
+
+  concepts: Array<{
+    concept: string
+    mastery: number
+    confidence: number
+    attempts: number
+    correct_attempts: number
+    recent_score: number
+    needs_examples: number
+    needs_step_by_step: number
+    next_review_at: string | null
+    review_interval_days?: number
+  }>
+
+  weak_concept_details: Array<{
+    concept: string
+    mastery: number
+    confidence: number
+  }>
+
+  due_review_details: Array<{
+    concept: string
+    mastery: number
+    confidence: number
+    next_review_at: string | null
+  }>
+
+  misconceptions: Array<{
+    id: number
+    concept: string
+    misconception: string
+    severity: string
+    occurrences: number
+    resolved: number
+    suggested_intervention: string | null
+  }>
+}
+
+export async function getLearnerAnalytics(
+  sessionId: string
+): Promise<LearnerAnalytics> {
+  const response = await fetch(
+    `${BASE_URL}/learner/analytics/${sessionId}`
+  )
+
+  return handleResponse(response)
+}
+
+export interface NextLearningAction {
+  learning_path: {
+    action: string
+    reason: string
+    concept?: string | null
+    mastery?: number
+    confidence?: number
+    difficulty?: string
+    next_review_at?: string | null
+    review_interval_days?: number
+  }
+
+  question_plan: {
+    concept?: string | null
+    difficulty: string
+    target: string
+    question_type: string
+    reason: string
+    misconception?: string
+    severity?: string
+    suggested_intervention?: string | null
+  }
+
+  next_action: string
+  concept?: string | null
+  difficulty: string
+  question_type: string
+  reason: string
+}
+
+
+export async function getNextLearningAction(
+  sessionId: string
+): Promise<NextLearningAction> {
+  const response = await fetch(
+    `${BASE_URL}/learner/next-action/${sessionId}`
+  )
+
+  return handleResponse(response)
+}
+
 export async function deleteSession(sessionId: string): Promise<{deleted: boolean}> {
   const response = await fetch(`${BASE_URL}/sessions/${sessionId}`, {
     method: 'DELETE',

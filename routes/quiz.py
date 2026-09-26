@@ -21,6 +21,7 @@ from db import (
     record_metacognitive_checkin,
     record_misconception,
     resolve_misconceptions,
+    get_active_misconceptions,
 )
 from agents.path_optimizer import optimize_learning_path
 from agents.adaptive_question_engine import get_adaptive_question_plan
@@ -61,14 +62,21 @@ def generate_quiz(session_id):
     data, parse_error = parse_json_request(request)
     if parse_error:
         return json_error(parse_error)
-    difficulty = data.get("difficulty", "medium")
+    requested_difficulty = data.get("difficulty")
+
     count, count_error = validate_quiz_count(data.get("count", 5))
 
     if count_error:
         return json_error(count_error)
 
+    # Get learner-adaptive plan FIRST
     adaptive_context = get_next_learning_action(session_id)
     adaptive_plan = adaptive_context["question_plan"]
+
+    # Adaptive difficulty takes priority when available
+    adaptive_difficulty = adaptive_plan.get("difficulty")
+
+    difficulty = requested_difficulty or adaptive_difficulty or "medium"
 
     adaptive_instruction = ""
 
@@ -99,9 +107,29 @@ def generate_quiz(session_id):
     """
 
     custom_instruction = f"""
-    Ensure the difficulty is {difficulty}.
-    Generate exactly {count} questions.
-    """ + adaptive_instruction
+Generate exactly {count} questions.
+
+Required difficulty: {difficulty}
+
+Difficulty rules:
+- easy = direct recall, definition, or identification
+- medium = explanation, comparison, or straightforward application
+- hard = reasoning, application, analysis, or multi-step thinking
+
+For HARD questions:
+- Do NOT ask simple definition questions.
+- Do NOT ask direct identification questions.
+- Require the student to apply, compare, explain why/how, or reason through a situation.
+
+Every question MUST contain:
+- a non-empty concept
+- a difficulty field
+- difficulty exactly equal to "{difficulty}"
+
+Never return null or empty concept.
+Never label a simple recall question as hard.
+
+""" + adaptive_instruction
     
     generator = Generator(json_mode=True)
     try:
@@ -117,14 +145,35 @@ def generate_quiz(session_id):
 
         mcq = generate_json(QUIZ_MCQ_PROMPT, full_text) or {"mcq": []}
         sa = generate_json(QUIZ_SHORT_ANSWER_PROMPT, full_text) or {"short_answer": []}
-        
+
+        adaptive_concept = adaptive_plan.get("concept")
+
         for i, m in enumerate(mcq.get("mcq", [])):
             m["id"] = f"mcq_{i}"
-            m["concept"] = adaptive_plan.get("concept")
-            
+
+            concept = adaptive_concept or m.get("concept")
+            if not concept:
+                raise ValueError("Generated MCQ is missing concept.")
+
+            m["concept"] = get_canonical_concept(str(concept))
+            m["difficulty"] = difficulty
+
+            if not m["concept"]:
+                raise ValueError("Generated MCQ has invalid concept.")
+
+
         for i, s in enumerate(sa.get("short_answer", [])):
             s["id"] = f"sa_{i}"
-            s["concept"] = adaptive_plan.get("concept")
+
+            concept = adaptive_concept or s.get("concept")
+            if not concept:
+                raise ValueError("Generated short-answer question is missing concept.")
+
+            s["concept"] = get_canonical_concept(str(concept))
+            s["difficulty"] = difficulty
+
+            if not s["concept"]:
+                raise ValueError("Generated short-answer question has invalid concept.")
             
         quiz = {"mcq": mcq.get("mcq", []), "short_answer": sa.get("short_answer", [])}
         session_data = session_store[session_id]
@@ -164,8 +213,26 @@ def generate_reassessment(session_id):
     generator = Generator(json_mode=True)
 
     try:
+        misconceptions = get_active_misconceptions(
+            session_id,
+            concept
+        )
+
+        active_misconception = (
+            misconceptions[0] if misconceptions else {}
+        )
+
         prompt = TARGETED_REASSESSMENT_PROMPT.format(
-            concept=concept
+            concept=concept,
+            misconception=active_misconception.get(
+                "misconception", ""
+            ),
+            evidence=active_misconception.get(
+                "evidence", ""
+            ),
+            suggested_intervention=active_misconception.get(
+                "suggested_intervention", ""
+            ),
         )
 
         res = generator.chain.invoke({
@@ -195,7 +262,7 @@ def generate_reassessment(session_id):
     except Exception as e:
         return jsonify({
             "error": "generation_failed",
-            "message": str(e),
+            "message": str(e)
         }), 500
 
 @quiz_bp.route('/quiz/grade', methods=['POST'])
@@ -212,8 +279,17 @@ def grade_answer():
     user_answer = data.get("user_answer") or ""
     sample_answer = data.get("sample_answer") or ""
 
-    concept_input = data.get("concept") or question or ""
-    concept = get_canonical_concept(concept_input)
+    concept_input = data.get("concept")
+
+    if concept_input:
+        concept = get_canonical_concept(str(concept_input))
+    else:
+        concept = ""
+
+    if not concept:
+        return json_error(
+        "Quiz question is missing a concept. Please generate the quiz again."
+    )
     
 
     session_id = data.get("session_id", "")
@@ -342,13 +418,18 @@ def grade_answer():
         )
 
         # Detect misconception for incorrect answers.
+        print("🔥 SCORE DEBUG:", score, "IS_REASSESSMENT:", is_reassessment)
         if score < 7:
-            grading["misconception"] = detect_misconception(
+            misconception_result = detect_misconception(
                 question=question,
                 student_answer=user_answer,
                 sample_answer=sample_answer,
                 concept=concept,
             )
+
+            print("🔎 MISCONCEPTION RESULT:", misconception_result)
+
+            grading["misconception"] = misconception_result
 
         # Update persistent learner data
         # only when a valid session exists.

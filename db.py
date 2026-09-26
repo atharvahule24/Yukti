@@ -1,8 +1,9 @@
 import json
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
+import re
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "Yukti.db")
 
@@ -81,6 +82,9 @@ def init_db():
                 needs_examples INTEGER DEFAULT 0,
                 needs_step_by_step INTEGER DEFAULT 0,
                 updated_at TEXT NOT NULL,
+                last_reviewed_at TEXT,
+                next_review_at TEXT,
+                review_interval_days REAL DEFAULT 1.0,
                 UNIQUE(session_id, concept),
                 FOREIGN KEY (session_id) REFERENCES sessions(session_id)
             )
@@ -254,13 +258,23 @@ def update_learner_state(
     score: float,
     misconception_severity: str | None = None,
 ):
-    now = datetime.utcnow().isoformat()
+    now = datetime.utcnow()
 
     with get_conn() as conn:
+
+        # =========================================================
+        # CORRECT CONCEPTS
+        # =========================================================
         for concept in correct_concepts:
+
             row = conn.execute(
                 """
-                SELECT mastery, confidence, attempts, correct_attempts
+                SELECT
+                    mastery,
+                    confidence,
+                    attempts,
+                    correct_attempts,
+                    review_interval_days
                 FROM learner_state
                 WHERE session_id=? AND concept=?
                 """,
@@ -282,6 +296,18 @@ def update_learner_state(
                     row["confidence"] + 0.1
                 )
 
+                # Increase revision interval after successful recall.
+                previous_interval = row["review_interval_days"] or 1.0
+
+                review_interval = min(
+                    30.0,
+                    max(1.0, previous_interval * 2)
+                )
+
+                next_review = now + timedelta(
+                    days=review_interval
+                )
+
                 conn.execute(
                     """
                     UPDATE learner_state
@@ -292,6 +318,9 @@ def update_learner_state(
                         recent_score=?,
                         needs_examples=0,
                         needs_step_by_step=0,
+                        last_reviewed_at=?,
+                        next_review_at=?,
+                        review_interval_days=?,
                         updated_at=?
                     WHERE session_id=? AND concept=?
                     """,
@@ -301,13 +330,23 @@ def update_learner_state(
                         attempts,
                         correct_attempts,
                         score,
-                        now,
+                        now.isoformat(),
+                        next_review.isoformat(),
+                        review_interval,
+                        now.isoformat(),
                         session_id,
                         concept,
                     ),
                 )
 
             else:
+                # First successful demonstration.
+                review_interval = 1.0
+
+                next_review = now + timedelta(
+                    days=review_interval
+                )
+
                 conn.execute(
                     """
                     INSERT INTO learner_state (
@@ -320,24 +359,73 @@ def update_learner_state(
                         recent_score,
                         needs_examples,
                         needs_step_by_step,
-                        updated_at
+                        updated_at,
+                        last_reviewed_at,
+                        next_review_at,
+                        review_interval_days
                     )
-                    VALUES (?, ?, 100.0, 0.6, 1, 1, ?, 0, 0, ?)
+                    VALUES (
+                        ?,
+                        ?,
+                        100.0,
+                        0.6,
+                        1,
+                        1,
+                        ?,
+                        0,
+                        0,
+                        ?,
+                        ?,
+                        ?,
+                        ?
+                    )
                     """,
-                    (session_id, concept, score, now),
+                    (
+                        session_id,
+                        concept,
+                        score,
+                        now.isoformat(),
+                        now.isoformat(),
+                        next_review.isoformat(),
+                        review_interval,
+                    ),
                 )
 
+        # =========================================================
+        # MISSED CONCEPTS
+        # =========================================================
         for concept in missed_concepts:
+
             row = conn.execute(
                 """
-                SELECT mastery, confidence, attempts, correct_attempts
+                SELECT
+                    mastery,
+                    confidence,
+                    attempts,
+                    correct_attempts
                 FROM learner_state
                 WHERE session_id=? AND concept=?
                 """,
                 (session_id, concept),
             ).fetchone()
 
+            # A missed concept should be reviewed soon.
+            review_interval = 1.0
+            next_review = now + timedelta(
+                days=review_interval
+            )
+
+            confidence_drop = {
+                "low": 0.05,
+                "medium": 0.10,
+                "high": 0.15,
+            }.get(
+                misconception_severity,
+                0.10
+            )
+
             if row:
+
                 attempts = row["attempts"] + 1
                 correct_attempts = row["correct_attempts"]
 
@@ -347,19 +435,10 @@ def update_learner_state(
                     else 0.0
                 )
 
-                confidence_drop = {
-                "low": 0.05,
-                "medium": 0.10,
-                "high": 0.15,
-                }.get(
-                misconception_severity,
-                0.10
-                )
-
                 confidence = max(
                     0.0,
                     row["confidence"] - confidence_drop
-)
+                )
 
                 conn.execute(
                     """
@@ -370,6 +449,9 @@ def update_learner_state(
                         recent_score=?,
                         needs_examples=1,
                         needs_step_by_step=1,
+                        last_reviewed_at=?,
+                        next_review_at=?,
+                        review_interval_days=?,
                         updated_at=?
                     WHERE session_id=? AND concept=?
                     """,
@@ -378,13 +460,17 @@ def update_learner_state(
                         confidence,
                         attempts,
                         score,
-                        now,
+                        now.isoformat(),
+                        next_review.isoformat(),
+                        review_interval,
+                        now.isoformat(),
                         session_id,
                         concept,
                     ),
                 )
 
             else:
+
                 initial_confidence = {
                     "low": 0.45,
                     "medium": 0.40,
@@ -406,18 +492,70 @@ def update_learner_state(
                         recent_score,
                         needs_examples,
                         needs_step_by_step,
-                        updated_at
+                        updated_at,
+                        last_reviewed_at,
+                        next_review_at,
+                        review_interval_days
                     )
-                    VALUES (?, ?, 0.0, ?, 1, 0, ?, 1, 1, ?)
+                    VALUES (
+                        ?,
+                        ?,
+                        0.0,
+                        ?,
+                        1,
+                        0,
+                        ?,
+                        1,
+                        1,
+                        ?,
+                        ?,
+                        ?,
+                        ?
+                    )
                     """,
                     (
                         session_id,
                         concept,
                         initial_confidence,
                         score,
-                        now,
+                        now.isoformat(),
+                        now.isoformat(),
+                        next_review.isoformat(),
+                        review_interval,
                     ),
                 )
+
+def normalize_misconception(text: str | None) -> str:
+    if not text:
+        return ""
+
+    text = text.lower().strip()
+
+    # Normalize formatting
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    text = re.sub(r"\s+", " ", text)
+
+    # Remove common filler phrases
+    filler_phrases = [
+        "the student",
+        "the learner",
+        "student",
+        "learner",
+        "seems to",
+        "appears to",
+        "shows a misunderstanding of",
+        "shows misunderstanding of",
+        "has a misconception about",
+        "has a misunderstanding about",
+        "misunderstands",
+    ]
+
+    for phrase in filler_phrases:
+        text = text.replace(phrase, " ")
+
+    text = re.sub(r"\s+", " ", text).strip()
+
+    return text
 
 def record_misconception(
     session_id: str,
@@ -584,7 +722,10 @@ def get_learner_state(session_id: str) -> list[dict]:
                 recent_score,
                 needs_examples,
                 needs_step_by_step,
-                updated_at
+                updated_at,
+                last_reviewed_at,
+                next_review_at,
+                review_interval_days
             FROM learner_state
             WHERE session_id=?
             ORDER BY mastery ASC
@@ -715,3 +856,85 @@ def get_due_card_ids(session_id: str) -> list[str]:
             (session_id,),
         ).fetchall()
     return [row["id"] for row in rows]
+
+def get_learning_analytics(session_id: str) -> dict:
+    """
+    Return an adaptive-learning summary for a learner session.
+    """
+
+    with get_conn() as conn:
+        states = conn.execute(
+            """
+            SELECT
+                concept,
+                mastery,
+                confidence,
+                attempts,
+                correct_attempts,
+                recent_score,
+                needs_examples,
+                needs_step_by_step,
+                updated_at,
+                last_reviewed_at,
+                next_review_at,
+                review_interval_days
+            FROM learner_state
+            WHERE session_id=?
+            ORDER BY mastery DESC
+            """,
+            (session_id,),
+        ).fetchall()
+
+    state_list = [dict(row) for row in states]
+
+    total_concepts = len(state_list)
+
+    average_mastery = (
+        sum(item["mastery"] for item in state_list)
+        / total_concepts
+        if total_concepts
+        else 0.0
+    )
+
+    mastered_concepts = [
+        item
+        for item in state_list
+        if item["mastery"] >= 70
+    ]
+
+    weak_concepts = [
+        item
+        for item in state_list
+        if item["mastery"] < 70
+    ]
+
+    due_reviews = [
+        item
+        for item in state_list
+        if item.get("next_review_at")
+        and item["next_review_at"] <= datetime.utcnow().isoformat()
+    ]
+
+    misconceptions = get_active_misconceptions(session_id)
+
+    return {
+        "overall_mastery": round(average_mastery, 2),
+        "total_concepts": total_concepts,
+        "mastered_concepts": len(mastered_concepts),
+        "weak_concepts": len(weak_concepts),
+        "due_reviews": len(due_reviews),
+        "active_misconceptions": len(misconceptions),
+        "average_confidence": round(
+            (
+                sum(item["confidence"] for item in state_list)
+                / total_concepts
+            )
+            if total_concepts
+            else 0.0,
+            2,
+        ),
+        "concepts": state_list,
+        "weak_concept_details": weak_concepts,
+        "due_review_details": due_reviews,
+        "misconceptions": misconceptions,
+    }

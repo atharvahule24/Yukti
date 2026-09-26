@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from db import (
     get_learner_state,
     get_latest_metacognitive_checkin,
@@ -35,11 +37,14 @@ def optimize_learning_path(
         current_states = [
             state
             for state in all_states
-            if state["concept"].lower() == current_concept.lower()
+            if get_canonical_concept(state["concept"]).lower()== get_canonical_concept(current_concept).lower()
         ]
 
         if current_states:
             states = current_states
+
+        else:
+            states = []
 
     # ---------------------------------------------------------
     # 2. No learner state yet -> check prerequisites first.
@@ -114,9 +119,18 @@ def optimize_learning_path(
             "difficulty": "medium",
         }
 
+    
+
     # ---------------------------------------------------------
     # 3. Find weakest concept in the current learning scope.
     # ---------------------------------------------------------
+    if not states:
+        return {
+        "action": "learn",
+        "reason": "No learner performance data is available yet. Start with new learning.",
+        "concept": current_concept,
+        "difficulty": "medium",
+    }
     weakest_state = min(
         states,
         key=lambda state: (
@@ -146,7 +160,65 @@ def optimize_learning_path(
             ),
         )
 
-        if repeated["occurrences"] >= 2 or repeated["severity"] == "high":
+        # ---------------------------------------------------------
+        # 3. Spaced revision
+        # ---------------------------------------------------------
+        now = datetime.utcnow()
+
+        due_reviews = []
+
+        for state in states:
+            next_review_at = state.get("next_review_at")
+
+            if not next_review_at:
+                continue
+
+            try:
+                next_review = datetime.fromisoformat(next_review_at)
+            except (TypeError, ValueError):
+                continue
+
+            if next_review <= now:
+                due_reviews.append(state)
+
+        if due_reviews:
+            due_reviews.sort(
+                key=lambda item: (
+                    item.get("mastery", 0),
+                    item.get("confidence", 0),
+                )
+            )
+
+            review_state = due_reviews[0]
+
+            return {
+                "action": "spaced_review",
+                "reason": (
+                    f"{review_state['concept']} is due for a retention review. "
+                    f"Current mastery is {review_state.get('mastery', 0):.0f}%."
+                ),
+                "concept": review_state["concept"],
+                "mastery": review_state.get("mastery", 0),
+                "confidence": review_state.get("confidence", 0),
+                "difficulty": (
+                    "easy"
+                    if review_state.get("mastery", 0) < 70
+                    else "medium"
+                ),
+                "next_review_at": review_state.get("next_review_at"),
+                "review_interval_days": review_state.get(
+                    "review_interval_days",
+                    1.0,
+                ),
+            }
+
+        if(
+            weakest_state["recent_score"] < 7
+            and (
+                repeated["severity"] in {"medium", "high"}
+                or repeated["misconception"] == "incomplete_understanding"
+            )
+        ):
             return {
                 "action": "targeted_misconception_review",
                 "reason": (
@@ -261,27 +333,8 @@ def optimize_learning_path(
                 "difficulty": "easy",
             }
 
-        # -----------------------------------------------------
-        # 7. Low mastery + low confidence -> scaffolding.
-        # -----------------------------------------------------
-        if (
-            weakest_state["mastery"] < 50
-            and student_confidence == 1
-        ):
-            return {
-                "action": "step_by_step_review",
-                "reason": (
-                    "Low mastery with low self-reported confidence "
-                    "suggests the student needs additional scaffolding."
-                ),
-                "concept": weakest_state["concept"],
-                "mastery": weakest_state["mastery"],
-                "confidence": weakest_state["confidence"],
-                "difficulty": "easy",
-            }
-
-        # -----------------------------------------------------
-        # 8. High performance + low confidence -> reinforce
+       # -----------------------------------------------------
+        # 7. High performance + low confidence -> reinforce
         # confidence rather than unnecessarily reteaching.
         # -----------------------------------------------------
         if (
@@ -299,6 +352,25 @@ def optimize_learning_path(
                 "mastery": weakest_state["mastery"],
                 "confidence": weakest_state["confidence"],
                 "difficulty": "medium",
+            }
+
+        # -----------------------------------------------------
+        # 8. Low mastery + low confidence -> scaffolding.
+        # -----------------------------------------------------
+        if (
+            weakest_state["mastery"] < 50
+            and student_confidence == 1
+        ):
+            return {
+                "action": "step_by_step_review",
+                "reason": (
+                    "Low mastery with low self-reported confidence "
+                    "suggests the student needs additional scaffolding."
+                ),
+                "concept": weakest_state["concept"],
+                "mastery": weakest_state["mastery"],
+                "confidence": weakest_state["confidence"],
+                "difficulty": "easy",
             }
 
     # ---------------------------------------------------------

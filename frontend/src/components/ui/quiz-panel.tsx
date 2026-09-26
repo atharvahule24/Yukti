@@ -28,12 +28,12 @@ const [reassessmentResults, setReassessmentResults] = useState<
 Record<string, GradeResult>
 >({})
 
-const [interventionResult, setInterventionResult] = useState<
-  (GradeResult & {
-    resolved?: boolean
-    misconception?: string | null
-    concept?: string
-  }) | null
+const [, setInterventionResult] = useState<
+(GradeResult & {
+resolved?: boolean
+misconception?: string | null
+concept?: string
+}) | null
 >(null)
 
 // Generation State
@@ -54,26 +54,26 @@ setLoading(false)
 }, [sessionId])
 
 useEffect(() => {
-  const handleInterventionResult = (event: Event) => {
-    const customEvent = event as CustomEvent
-    const result = customEvent.detail
+const handleInterventionResult = (event: Event) => {
+const customEvent = event as CustomEvent
+const result = customEvent.detail
 
-    if (!result) return
+if (!result) return
 
-    setInterventionResult(result)
-  }
+setInterventionResult(result)
+}
 
-  window.addEventListener(
-    'yukti:intervention-result',
-    handleInterventionResult
-  )
+window.addEventListener(
+'yukti:intervention-result',
+handleInterventionResult
+)
 
-  return () => {
-    window.removeEventListener(
-      'yukti:intervention-result',
-      handleInterventionResult
-    )
-  }
+return () => {
+window.removeEventListener(
+'yukti:intervention-result',
+handleInterventionResult
+)
+}
 }, [])
 
 const handleGenerate = async () => {
@@ -475,45 +475,50 @@ How confident were you in your answer?
 <button
 key={option.value}
 onClick={async () => {
-  setConfidenceRatings((prev) => ({
-    ...prev,
-    [question.id]: option.value,
-  }))
+setConfidenceRatings((prev) => ({
+...prev,
+[question.id]: option.value,
+}))
 
-  try {
-    const concept = question.concept || "general"
+try {
+const concept = question.concept?.trim()
 
-    const pathResult = await recordMetacognitiveCheckin(
-      sessionId,
-      concept,
-      option.value
-    )
+if (!concept) {
+console.error("Quiz question is missing concept:", question)
+return
+}
 
-    setGradingResults((prev) => ({
-      ...prev,
-      [question.id]: {
-        ...prev[question.id],
-        learning_path: pathResult.learning_path,
-      },
-    }))
+const pathResult = await recordMetacognitiveCheckin(
+sessionId,
+concept,
+option.value
+)
 
-    // Automatically start targeted reassessment when the
-    // learner needs additional support.
-    const action = pathResult.learning_path?.action
+setGradingResults((prev) => ({
+...prev,
+[question.id]: {
+...prev[question.id],
+learning_path: pathResult.learning_path,
+},
+}))
 
-    if (
-      action === "targeted_misconception_review" ||
-      action === "step_by_step_review" ||
-      action === "example_based_review"
-    ) {
-      await handleGenerateReassessment(
-        question.id,
-        pathResult.learning_path?.concept || concept
-      )
-    }
-  } catch (e) {
-    console.error("Failed to save confidence rating:", e)
-  }
+// Automatically start targeted reassessment when the
+// learner needs additional support.
+const action = pathResult.learning_path?.action
+
+if (
+action === "targeted_misconception_review" ||
+action === "step_by_step_review" ||
+action === "example_based_review"
+) {
+await handleGenerateReassessment(
+question.id,
+pathResult.learning_path?.concept || concept
+)
+}
+} catch (e) {
+console.error("Failed to save confidence rating:", e)
+}
 }}
 className={`px-3 py-2 rounded-lg text-sm transition-opacity ${
 confidenceRatings[question.id] === option.value
@@ -554,16 +559,16 @@ result.learning_path?.concept || 'this concept'
 const prompt = `Help me correct my misunderstanding of ${concept}. Focus on the specific misconception in my answer, explain the correct concept clearly, and then ask me one checking question to verify my understanding.`
 
 window.dispatchEvent(
-  new CustomEvent('yukti:ask', {
-    detail: {
-      prompt,
-      teachingMode: 'socratic',
-      intervention: true,
-      concept,
-      misconception:
-        result.learning_path?.misconception || undefined,
-    },
-  })
+new CustomEvent('yukti:ask', {
+detail: {
+prompt,
+teachingMode: 'socratic',
+intervention: true,
+concept,
+misconception:
+result.learning_path?.misconception || undefined,
+},
+})
 )
 }}
 className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--radius)] text-sm font-medium hover:opacity-90 transition-opacity"
@@ -622,37 +627,37 @@ if (!reassessment || !answer) return
 
 try {
 const result = await gradeAnswer(
-  reassessment.question,
-  answer,
-  reassessment.sample_answer,
-  sessionId,
-  reassessment.concept,
-  undefined,
-  true
+reassessment.question,
+answer,
+reassessment.sample_answer,
+sessionId,
+reassessment.concept,
+undefined,
+true
 )
 
 console.log("REASSESSMENT RESULT:", result)
 
 setReassessmentResults((prev) => ({
-  ...prev,
-  [question.id]: result,
+...prev,
+[question.id]: result,
 }))
 
 // If the learner still needs targeted review,
 // automatically generate another checking question.
 if (
-  result.score < 7 &&
-  result.learning_path?.action === "targeted_misconception_review"
+result.score < 7 &&
+reassessmentResults[question.id]?.learning_path?.action === "targeted_misconception_review"
 ) {
-  await handleGenerateReassessment(
-    question.id,
-    result.learning_path?.concept || reassessment.concept
-  )
+await handleGenerateReassessment(
+question.id,
+result.learning_path?.concept || reassessment.concept
+)
 
-  setReassessmentAnswers((prev) => ({
-    ...prev,
-    [question.id]: "",
-  }))
+setReassessmentAnswers((prev) => ({
+...prev,
+[question.id]: "",
+}))
 }
 } catch (e) {
 console.error('Failed to grade reassessment:', e)
@@ -695,18 +700,18 @@ question.concept
 const prompt = `Help me correct my misunderstanding of ${concept}. Focus on the specific misconception in my answer, explain the correct concept clearly, and then ask me one checking question.`
 
 window.dispatchEvent(
-  new CustomEvent('yukti:ask', {
-    detail: {
-      prompt,
-      teachingMode: getTeachingModeForAction(
-        result.learning_path?.action || ''
-      ),
-      intervention: true,
-      concept,
-      misconception:
-        reassessmentResults[question.id]?.misconception || undefined,
-    },
-  })
+new CustomEvent('yukti:ask', {
+detail: {
+prompt,
+teachingMode: getTeachingModeForAction(
+reassessmentResults[question.id]?.learning_path?.action || ''
+),
+intervention: true,
+concept,
+misconception:
+reassessmentResults[question.id]?.misconception || undefined,
+},
+})
 )
 }}
 className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--radius)] text-sm font-medium hover:opacity-90 transition-opacity"

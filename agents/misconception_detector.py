@@ -49,14 +49,37 @@ Canonical concepts:
 Analyze the student's reasoning carefully.
 
 Rules:
-- Identify a misconception only when there is evidence in the student's answer.
-- Do not invent a misconception when the answer is merely incomplete.
-- If the answer is incomplete but shows no clear misconception, use:
+- Identify a misconception only when the student's answer contains
+  evidence of an incorrect belief, incorrect causal relationship,
+  or incorrect explanation.
+
+- IMPORTANT:
+  Missing facts, missing examples, short answers, or failure to mention
+  all expected points are NOT by themselves misconceptions.
+
+- If the student's statements are correct but incomplete, use:
   "incomplete_understanding"
+
+- If the student gives correct reasoning but omits supporting examples,
+  specific adaptations, consequences, or details from the sample answer,
+  classify it as:
+  "incomplete_understanding"
+
+- Use a specific misconception only when the student actually states
+  or clearly implies something incorrect.
+
+- Do not infer a misconception merely because information is absent.
+
+- severity must be one of: "low", "medium", "high".
+  Use:
+  "low" for incomplete understanding or minor gaps,
+  "medium" for a meaningful conceptual misunderstanding,
+  "high" for a major or fundamental misconception.
+
+- suggested_intervention should be one concrete teaching action.
+
 - Keep the misconception specific and educationally useful.
 - Use ONLY the provided canonical concepts.
-- severity must be one of: "low", "medium", "high".
-- suggested_intervention should be one concrete teaching action.
 
 Return ONLY valid JSON:
 

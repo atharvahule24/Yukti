@@ -78,38 +78,102 @@ Return ONLY valid JSON, no other text:
   ]
 }"""
 
-QUIZ_MCQ_PROMPT = """Based on the provided context, generate exactly 5 multiple choice questions.
-Vary difficulty: 2 easy, 2 medium, 1 hard.
-Each explanation must state WHY the correct answer is right AND why each wrong option is wrong.
+QUIZ_MCQ_PROMPT = """Based on the provided context, generate the requested number of multiple choice questions.
+
+The caller will specify the required difficulty.
+Follow that difficulty exactly.
+
+Difficulty rules:
+- easy = direct recall, definition, identification
+- medium = explanation, comparison, or straightforward application
+- hard = reasoning, application, analysis, or multi-step thinking
+
+For hard questions, NEVER generate a simple definition or identification question.
+
+Every question MUST include:
+- question
+- options
+- answer
+- difficulty
+- concept
+- explanation
+
+The "difficulty" field MUST exactly match the requested difficulty.
+The "concept" field MUST be a specific non-empty concept being tested.
+
 Return ONLY valid JSON, no other text:
 {
   "mcq": [
     {
-  "question": "string",
-  "options": ["string", "string", "string", "string"],
-  "answer": 0,
-  "difficulty": "easy or medium or hard",
-  "concept": "short concept name being tested",
-  "explanation": "string explaining correct answer and why distractors are wrong"
-}
+      "question": "string",
+      "options": ["string", "string", "string", "string"],
+      "answer": 0,
+      "difficulty": "easy or medium or hard",
+      "concept": "short concept name being tested",
+      "explanation": "string explaining correct answer and why distractors are wrong"
+    }
   ]
 }"""
 
-QUIZ_SHORT_ANSWER_PROMPT = """Based on the provided context, generate 3 short answer questions.
-For each question, identify the short concept being tested.
+QUIZ_SHORT_ANSWER_PROMPT = """Based on the provided context, generate the requested number of short answer questions.
+
+Follow the requested difficulty exactly.
+
+Difficulty rules:
+- easy = direct recall or identification
+- medium = explanation, comparison, or straightforward application
+- hard = reasoning, application, analysis, or multi-step thinking
+
+For hard questions:
+- Do NOT ask simple definition questions.
+- Do NOT ask direct identification questions.
+- Require the student to apply or reason about the concept.
+
+Every question MUST contain:
+- question
+- sample_answer
+- concept
+- difficulty
+
+The concept must be a specific, non-empty concept being tested.
+The difficulty must exactly match the requested difficulty.
+
 Return ONLY valid JSON, no other text:
-{"short_answer": [{"question": "str", "sample_answer": "str", "concept": "short concept name being tested"}]}"""
+{
+  "short_answer": [
+    {
+      "question": "str",
+      "sample_answer": "str",
+      "concept": "short concept name being tested",
+      "difficulty": "easy or medium or hard"
+    }
+  ]
+}"""
 
 TARGETED_REASSESSMENT_PROMPT = """Based on the provided context, generate exactly 1 short answer question to reassess the student's understanding of the specified concept.
 
 The question must:
-- Test the core concept directly.
+- Test the student's specific misunderstanding, not just the concept generally.
+- Directly address the identified misconception or incomplete understanding.
+- Use the evidence to target the exact knowledge gap shown in the student's previous answer.
 - Be different from the student's original question.
 - Be appropriate for a school student.
 - Focus only on the specified concept.
+- Do not reveal the correct answer in the question.
 - Help determine whether the student's previous misunderstanding has been corrected.
 
 Specified concept: {concept}
+
+Identified misconception:
+{misconception}
+
+Evidence from the student's previous answer:
+{evidence}
+
+Suggested intervention:
+{suggested_intervention}
+
+Generate a checking question that tests the identified gap.
 
 Return ONLY valid JSON, no other text:
 {{"short_answer": [{{"question": "str", "sample_answer": "str", "concept": "{concept}"}}]}}"""
