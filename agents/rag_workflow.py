@@ -21,7 +21,10 @@ class RagWorkflow:
             temperature=0.3,
             max_tokens=1024,
             api_key=self.groq_api_key,
-            streaming=True
+            streaming=True,
+            model_kwargs={
+            "tool_choice": "none"
+            }
         )
         self.embedder = Embedder()
         # Ensure we use the index.faiss path structure correctly
@@ -59,34 +62,67 @@ class RagWorkflow:
             print(context[:2000], flush=True)
             print("===== CONTEXT END =====", flush=True)
             print("CONTEXT PREVIEW:", context[:1000])
-        except Exception:
+        except Exception as e:
             print("RETRIEVAL ERROR:", repr(e))
             docs = []
             context = ""
 
         # Node 2 & 3: Generate
         system_prompt = self._get_system_prompt(mode)
+
         history = get_history(session_id, limit=6) if session_id else []
-        
+
+        rag_system_prompt = system_prompt + """
+
+IMPORTANT:
+The retrieved study material below IS the content of the student's uploaded document.
+You have access to this material directly.
+Do NOT say that you cannot see, open, access, or read the uploaded file.
+
+Use the retrieved study material to answer the student's question.
+If the retrieved material does not contain enough information to answer,
+say that the retrieved material does not contain enough information.
+
+Retrieved study material:
+{context}
+"""
+
         prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt + "\n\nContext:\n{context}"),
-            *[(item["role"], item["content"]) for item in history if item["role"] in {"user", "assistant"}],
+            ("system", rag_system_prompt),
+            *[
+                (item["role"], item["content"])
+                for item in history
+                if item["role"] in {"user", "assistant"}
+            ],
             ("user", "{message}")
         ])
 
         chain = prompt | self.model
 
         if session_id:
-            save_message(session_id, "user", message, datetime.now(timezone.utc).isoformat())
+            save_message(
+                session_id,
+                "user",
+                message,
+                datetime.now(timezone.utc).isoformat()
+            )
 
-        # Stream
-        answer_parts = []
-        for chunk in chain.stream({"context": context, "message": message}):
-            if chunk.content:
-                answer_parts.append(chunk.content)
-                yield {"type": "token", "data": chunk.content}
+        print("===== LLM GENERATION START =====", flush=True)
 
-        answer = "".join(answer_parts)
+        response = chain.invoke({
+            "context": context,
+            "message": message
+        })
+
+        print("LLM RESPONSE TYPE:", type(response), flush=True)
+        print("LLM RESPONSE CONTENT:", repr(response.content), flush=True)
+
+        answer = response.content or ""
+
+        if answer:
+            yield {"type": "token", "data": answer}
+
+        print("===== LLM GENERATION END =====", flush=True)
         if session_id and answer:
             save_message(session_id, "assistant", answer, datetime.now(timezone.utc).isoformat())
 

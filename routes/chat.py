@@ -46,6 +46,9 @@ def chat():
             
             yield f'data: {json.dumps({"token": "", "done": True})}\n\n'
         except Exception as e:
+            print("🔥 CHAT STREAM ERROR:", repr(e), flush=True)
+            import traceback
+            traceback.print_exc()
             yield f'data: {json.dumps({"error": str(e), "done": True})}\n\n'
 
     return Response(

@@ -41,6 +41,7 @@ class VectorStore:
             self.load(self._embeddings_model)
 
     def search(self, query, k=3, session_id=None):
+        self._ensure_loaded()
         if self.vector_store is None:
             return []
         print("FAISS TOTAL DOCS:", self.vector_store.index.ntotal, flush=True)
@@ -54,28 +55,43 @@ class VectorStore:
         print("LOOKING FOR SESSION:", session_id, flush=True)
         # Return LangChain Document objects
         if session_id:
-            try:
-                return self.vector_store.max_marginal_relevance_search(
-                    query,
-                    k=k,
-                    fetch_k=max(10, k * 4),
-                    filter={"session_id": session_id}
+            # LangChain's metadata filter is not returning the documents
+            # even though they exist in the FAISS docstore.
+            # Manually isolate this session first, then rank its documents
+            # using the existing embedding model.
+
+            session_docs = [
+                doc
+                for doc in self.vector_store.docstore._dict.values()
+                if doc.metadata.get("session_id") == session_id
+            ]
+
+            print("MANUAL SESSION DOCS:", len(session_docs), flush=True)
+
+            if not session_docs:
+                return []
+
+            query_embedding = self._embeddings_model.embed_query(query)
+
+            scored_docs = []
+
+            for doc in session_docs:
+                doc_embedding = self._embeddings_model.embed_query(
+                    doc.page_content
                 )
-            except TypeError:
-                # Fetch a much larger global pool to prevent session data starvation
-                fallback_k = 50
-                docs = self.vector_store.max_marginal_relevance_search(
-                    query,
-                    k=fallback_k,
-                    fetch_k=fallback_k * 2
+
+                score = sum(
+                    q * d
+                    for q, d in zip(query_embedding, doc_embedding)
                 )
-                results = [doc for doc in docs if doc.metadata.get("session_id") == session_id][:k]
-                if not results:
-                    import logging
-                    logging.getLogger(__name__).warning(
-                        "Fallback filter returned no documents for session_id=%s. "
-                        "Consider increasing fallback_k if the vector store has many sessions.",
-                        session_id
-                    )
-                return results
+
+                scored_docs.append((score, doc))
+
+            scored_docs.sort(key=lambda item: item[0], reverse=True)
+
+            results = [doc for _, doc in scored_docs[:k]]
+
+            print("MANUAL RETRIEVAL RESULTS:", len(results), flush=True)
+
+            return results
         return self.vector_store.max_marginal_relevance_search(query, k=k, fetch_k=10)
