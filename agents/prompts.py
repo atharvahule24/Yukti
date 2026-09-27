@@ -228,9 +228,17 @@ IMPORTANT GRADING PROCESS:
 12. Do NOT invent mistakes or explanations that are not supported by the question and answer.
 13. For numerical or mathematical questions, independently calculate and verify the correct result before assigning a score.
 14. Do NOT claim that arithmetic is incorrect unless you have actually checked the calculation yourself.
-15. If the student's answer matches the required correct result, treat it as correct even if the reasoning is not shown.
-16. Feedback must tell the student exactly what they should improve next.
-
+15. If the student's answer matches the required correct result, treat that component as correct even if the reasoning is not shown.
+16. For questions containing multiple required components, evaluate each component independently before assigning the overall score.
+17. If the student correctly provides one essential component but omits or incorrectly answers other essential components, award partial credit proportional to what was demonstrated. Do NOT treat the entire answer as incorrect simply because it is incomplete.
+18. For numerical questions that also ask for explanation, distinguish between:
+    - correctness of the numerical result,
+    - completeness of the required values,
+    - conceptual explanation or reasoning.
+    A correct numerical result with a missing explanation should receive partial credit, not a near-zero score.
+19. If a student gives a correct numerical value but does not answer the conceptual part of the question, explicitly state that the numerical result is correct and identify the missing conceptual requirement in the feedback.
+20. Do not award full credit when an essential requested component is missing.
+21. Feedback must tell the student exactly what they should improve next.
 IMPORTANT VAGUE-ANSWER RULE:
 - If the question asks for a specific event, date, person, cause, consequence, definition, process, or historical change, the student must actually identify that specific information.
 - Generic statements such as "it was an important year", "it caused major changes", "it affected society", or "it changed governance" are not sufficient by themselves when the question asks what specifically happened or why it was significant.

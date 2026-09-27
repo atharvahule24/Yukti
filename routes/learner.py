@@ -29,8 +29,8 @@ def learner_video_recommendation(session_id):
         recommendation = recommend_video_search(
             concept=plan.get("concept", ""),
             difficulty=plan.get("difficulty", "medium"),
-            action=plan.get("action", "review"),
-            misconception=plan.get("misconception"),
+            action=plan.get("learning_path", {}).get("action", "review"),
+            misconception=plan.get("learning_path", {}).get("misconception"),
         )
 
         return jsonify({

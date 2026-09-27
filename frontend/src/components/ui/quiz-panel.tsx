@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { getQuiz, generateQuiz, getFact, gradeAnswer,
-recordMetacognitiveCheckin,generateReassessment,} from '../../lib/api'
+recordMetacognitiveCheckin,generateReassessment,getVideoRecommendation,} from '../../lib/api'
 import type { GradeResult, MCQ, ShortAnswer } from '../../lib/api'
 import { Loader2, CheckCircle2, XCircle, ChevronRight, HelpCircle, MessageSquare } from 'lucide-react'
 
@@ -15,6 +15,15 @@ const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
 const [showHint, setShowHint] = useState(false)
 const [shortAnswers, setShortAnswers] = useState<Record<string, string>>({})
 const [gradingResults, setGradingResults] = useState<Record<string, GradeResult>>({})
+
+const [videoRecommendation, setVideoRecommendation] = useState<{
+query: string
+url: string
+concept: string
+difficulty: string
+action: string
+} | null>(null)
+const [showVideoCheck, setShowVideoCheck] = useState(false)
 const [gradingQuestionId, setGradingQuestionId] = useState<string | null>(null)
 const [confidenceRatings, setConfidenceRatings] = useState<Record<string, number>>({})
 const [reassessmentQuestions, setReassessmentQuestions] = useState<
@@ -106,6 +115,9 @@ window.dispatchEvent(new CustomEvent('yukti:ask', { detail: question }))
 const handleGradeShortAnswer = async (question: ShortAnswer) => {
 const answer = shortAnswers[question.id]?.trim()
 if (!answer) return
+
+console.log("GRADING QUESTION OBJECT:", question)
+console.log("GRADING QUESTION CONCEPT:", question.concept)
 
 setGradingQuestionId(question.id)
 try {
@@ -460,6 +472,60 @@ Next learning step
 </div>
 )}
 
+{videoRecommendation && (
+<div className="mt-3 p-4 rounded-lg bg-purple-500/10 border border-purple-500/20">
+<div className="flex items-start gap-3">
+<div className="text-xl">🎥</div>
+
+<div className="flex-1">
+<p className="text-sm font-semibold text-purple-300">
+Recommended Video
+</p>
+
+<p className="text-xs text-white/60 mt-1">
+Based on your current learning need
+</p>
+
+<p className="text-sm text-white/80 mt-2">
+<span className="font-medium">Topic:</span>{" "}
+{videoRecommendation.concept}
+</p>
+
+<p className="text-xs text-white/50 mt-1">
+{videoRecommendation.query}
+</p>
+
+<a
+  href={videoRecommendation.url}
+  target="_blank"
+  rel="noopener noreferrer"
+  onClick={() => setShowVideoCheck(true)}
+className="inline-flex mt-3 px-4 py-2 rounded-lg bg-[var(--accent-purple)] text-white text-sm font-medium hover:opacity-90"
+>
+Watch on YouTube →
+</a>
+</div>
+</div>
+</div>
+)}
+
+{showVideoCheck && videoRecommendation && (
+  <button
+    onClick={() => {
+      handleGenerateReassessment(
+        question.id,
+        videoRecommendation.concept
+      )
+    }}
+    disabled={reassessmentLoading === question.id}
+    className="mt-3 ml-2 px-4 py-2 rounded-lg bg-blue-500 text-white text-sm font-medium hover:opacity-90 disabled:opacity-50"
+  >
+    {reassessmentLoading === question.id
+      ? 'Preparing question...'
+      : 'Check My Understanding'}
+  </button>
+)}
+
 {result && (
 <div className="mt-3 p-3 rounded-lg bg-green-500/10 border border-green-500/20">
 <p className="text-xs text-green-300/80 font-medium mb-2">
@@ -502,20 +568,31 @@ learning_path: pathResult.learning_path,
 },
 }))
 
+
+
 // Automatically start targeted reassessment when the
 // learner needs additional support.
 const action = pathResult.learning_path?.action
 
-if (
-action === "targeted_misconception_review" ||
-action === "step_by_step_review" ||
-action === "example_based_review"
-) {
-await handleGenerateReassessment(
-question.id,
-pathResult.learning_path?.concept || concept
-)
+const videoActions = [
+'targeted_misconception_review',
+'step_by_step_review',
+'example_based_review',
+'prerequisite_review',
+]
+
+if (videoActions.includes(action)) {
+try {
+const videoResult = await getVideoRecommendation(sessionId)
+setVideoRecommendation(videoResult.video)
+} catch (error) {
+console.error('Failed to load video recommendation:', error)
+setVideoRecommendation(null)
 }
+} else {
+setVideoRecommendation(null)
+}
+
 } catch (e) {
 console.error("Failed to save confidence rating:", e)
 }

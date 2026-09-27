@@ -487,3 +487,25 @@ export async function getProgress(sessionId: string): Promise<{ quiz_avg: number
   const response = await fetch(`${BASE_URL}/progress/${sessionId}`);
   return handleResponse(response);
 }
+
+export interface VideoRecommendation {
+  type: string
+  query: string
+  url: string
+  concept: string
+  difficulty: string
+  action: string
+}
+
+export async function getVideoRecommendation(
+  sessionId: string
+): Promise<{
+  learning_path: any
+  video: VideoRecommendation
+}> {
+  const response = await fetch(
+    `${BASE_URL}/learner/video-recommendation/${sessionId}`
+  )
+
+  return handleResponse(response)
+}

@@ -76,7 +76,7 @@ def generate_quiz(session_id):
     # Adaptive difficulty takes priority when available
     adaptive_difficulty = adaptive_plan.get("difficulty")
 
-    difficulty = requested_difficulty or adaptive_difficulty or "medium"
+    difficulty = adaptive_difficulty or requested_difficulty or "medium"
 
     adaptive_instruction = ""
 
