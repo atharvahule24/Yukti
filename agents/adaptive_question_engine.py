@@ -9,8 +9,13 @@ def get_adaptive_question_plan(
     """
     Decide what kind of question the learner should receive next.
 
-    If a learning_path is supplied by the orchestrator, reuse it instead
-    of calculating the path again.
+    The path optimizer decides WHAT the learner needs next.
+    This module converts that decision into a question strategy:
+    - concept
+    - difficulty
+    - target
+    - question type
+    - misconception focus
     """
 
     if learning_path is None:
@@ -32,21 +37,21 @@ def get_adaptive_question_plan(
             "reason": "No learner state is available yet.",
         }
 
+    # ---------------------------------------------------------
+    # 1. Unresolved misconception
+    # ---------------------------------------------------------
     misconceptions = get_active_misconceptions(
         session_id,
         target_concept,
     )
 
-    # ---------------------------------------------------------
-    # Unresolved misconception → targeted correction
-    # ---------------------------------------------------------
     if misconceptions:
         misconception = max(
             misconceptions,
             key=lambda item: (
-                item["occurrences"],
-                item["severity"] == "high",
-                item["severity"] == "medium",
+                item.get("occurrences", 1),
+                item.get("severity") == "high",
+                item.get("severity") == "medium",
             ),
         )
 
@@ -55,9 +60,9 @@ def get_adaptive_question_plan(
             "difficulty": "easy",
             "target": "misconception",
             "question_type": "conceptual",
-            "misconception": misconception["misconception"],
-            "evidence": misconception["evidence"],
-            "severity": misconception["severity"],
+            "misconception": misconception.get("misconception"),
+            "evidence": misconception.get("evidence"),
+            "severity": misconception.get("severity", "medium"),
             "suggested_intervention": misconception.get(
                 "suggested_intervention"
             ),
@@ -68,89 +73,120 @@ def get_adaptive_question_plan(
             ),
         }
 
-    if learning_path["action"] == "prerequisite_review":
-        return {
-        "concept": learning_path["concept"],
-        "difficulty": learning_path.get("difficulty", "easy"),
-        "target": "prerequisite",
-        "question_type": "conceptual",
-        "reason": learning_path["reason"],
-        "target_concept": learning_path.get("target_concept"),
-    }
+    action = learning_path.get("action", "review")
+    difficulty = learning_path.get("difficulty", "medium")
+    reason = learning_path.get(
+        "reason",
+        "The learner needs additional practice with this concept.",
+    )
 
     # ---------------------------------------------------------
-    # Step-by-step support
+    # 2. Prerequisite review
     # ---------------------------------------------------------
-
-    if learning_path["action"] == "prerequisite_review":
+    if action == "prerequisite_review":
         return {
-        "concept": learning_path["concept"],
-        "difficulty": learning_path.get("difficulty", "easy"),
-        "target": "prerequisite",
-        "question_type": "conceptual",
-        "target_concept": learning_path.get("target_concept"),
-        "reason": learning_path.get(
-            "reason",
-            "A prerequisite concept needs strengthening before continuing."
-        ),
-    }
+            "concept": learning_path.get("concept") or target_concept,
+            "difficulty": "easy",
+            "target": "prerequisite",
+            "question_type": "conceptual",
+            "target_concept": learning_path.get("target_concept"),
+            "reason": reason,
+        }
 
-    if learning_path["action"] == "step_by_step_review":
+    # ---------------------------------------------------------
+    # 3. Step-by-step support
+    # ---------------------------------------------------------
+    if action == "step_by_step_review":
         return {
             "concept": target_concept,
             "difficulty": "easy",
             "target": "scaffolding",
             "question_type": "step_by_step",
-            "reason": learning_path["reason"],
+            "reason": reason,
         }
 
     # ---------------------------------------------------------
-    # Example-based reinforcement
+    # 4. Example-based reinforcement
     # ---------------------------------------------------------
-    if learning_path["action"] == "example_based_review":
+    if action == "example_based_review":
         return {
             "concept": target_concept,
             "difficulty": "easy",
             "target": "example_application",
             "question_type": "application",
-            "reason": learning_path["reason"],
+            "reason": reason,
         }
 
-    if learning_path["action"] == "spaced_review":
+    # ---------------------------------------------------------
+    # 5. Spaced review
+    # ---------------------------------------------------------
+    if action == "spaced_review":
         return {
-        "concept": learning_path["concept"],
-        "difficulty": learning_path.get("difficulty", "medium"),
-        "target": "retention",
-        "question_type": "recall",
-        "reason": learning_path.get(
-            "reason",
-            "This concept is due for a retention review.",
-        ),
+            "concept": target_concept,
+            "difficulty": difficulty,
+            "target": "retention",
+            "question_type": "recall",
+            "reason": reason,
         }
 
     # ---------------------------------------------------------
-    # Confidence reinforcement
+    # 6. Confidence reinforcement
     # ---------------------------------------------------------
-    if learning_path["action"] == "confidence_reinforcement":
+    if action == "confidence_reinforcement":
         return {
             "concept": target_concept,
             "difficulty": "medium",
             "target": "confidence",
             "question_type": "conceptual",
-            "reason": learning_path["reason"],
+            "reason": reason,
         }
 
     # ---------------------------------------------------------
-    # Generic review / practice / advance
+    # 7. Review
+    # ---------------------------------------------------------
+    if action == "review":
+        return {
+            "concept": target_concept,
+            "difficulty": difficulty,
+            "target": "review",
+            "question_type": "conceptual",
+            "reason": reason,
+        }
+
+    # ---------------------------------------------------------
+    # 8. Practice
+    # ---------------------------------------------------------
+    if action == "practice":
+        return {
+            "concept": target_concept,
+            "difficulty": difficulty,
+            "target": "practice",
+            "question_type": "application",
+            "reason": reason,
+        }
+
+    # ---------------------------------------------------------
+    # 9. Advance
+    # ---------------------------------------------------------
+    if action == "advance":
+        return {
+            "concept": target_concept,
+            "difficulty": difficulty,
+            "target": "advanced_application",
+            "question_type": "transfer",
+            "reason": (
+                "The learner has demonstrated sufficient understanding "
+                "to move toward a more challenging application."
+            ),
+        }
+
+    # ---------------------------------------------------------
+    # 10. Safe fallback
     # ---------------------------------------------------------
     return {
         "concept": target_concept,
-        "difficulty": learning_path.get("difficulty", "medium"),
-        "target": learning_path["action"],
-        "question_type": (
-            "application"
-            if learning_path["action"] == "practice"
-            else "conceptual"
-        ),
-        "reason": learning_path["reason"],
+        "difficulty": difficulty,
+        "target": action,
+        "question_type": "conceptual",
+        "reason": reason,
     }

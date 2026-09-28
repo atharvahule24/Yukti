@@ -78,58 +78,219 @@ def generate_quiz(session_id):
 
     difficulty = adaptive_difficulty or requested_difficulty or "medium"
 
+    print(">>> GENERATING NEW ADAPTIVE QUIZ")
+    print(">>> ADAPTIVE PLAN:", adaptive_plan)
+    print(">>> DIFFICULTY:", difficulty)
+
     adaptive_instruction = ""
 
     if adaptive_plan.get("concept"):
         adaptive_instruction = f"""
-    Adapt the quiz to the learner's current learning state.
+    ADAPTIVE LEARNING INSTRUCTIONS
 
-    Target concept: {adaptive_plan["concept"]}
-    Adaptive target: {adaptive_plan["target"]}
-    Question style: {adaptive_plan["question_type"]}
-    Recommended difficulty: {adaptive_plan["difficulty"]}
+    Target concept:
+    {adaptive_plan.get("concept", "")}
+
+    Adaptive target:
+    {adaptive_plan.get("target", "")}
+
+    Question type:
+    {adaptive_plan.get("question_type", "conceptual")}
+
+    Recommended difficulty:
+    {adaptive_plan.get("difficulty", "medium")}
 
     Reason for this adaptation:
-    {adaptive_plan["reason"]}
+    {adaptive_plan.get("reason", "")}
+
+    Generate the question so that it follows BOTH the adaptive target
+    and the question type.
+
+    QUESTION TYPE RULES:
+
+    1. conceptual
+    - Test whether the learner understands the underlying concept.
+    - Prefer why, how, comparison, explanation, or interpretation.
+    - Do not make the question unnecessarily difficult.
+
+    2. application
+    - Give a situation or problem involving the target concept.
+    - Require the learner to apply the concept rather than merely define it.
+    - Use a meaningful educational context when appropriate.
+
+    3. step_by_step
+    - Require the learner to demonstrate the reasoning process.
+    - Break the task into manageable stages.
+    - Make the intermediate reasoning visible.
+
+    4. recall
+    - Test retrieval of an already learned concept.
+    - Prefer a definition, fact, formula, relationship, or previously learned idea.
+    - Do not introduce substantial new reasoning.
+
+    5. transfer
+    - Apply the concept in a new or unfamiliar situation.
+    - Do not simply repeat an example used during teaching.
+    - Require reasoning or application in the new context.
+
+    ADAPTIVE TARGET RULES:
+
+        If the adaptive target is "misconception":
+    - Directly diagnose the identified misconception.
+    - The question MUST require the learner to demonstrate whether they understand the underlying issue.
+    - Do not merely ask for a definition or ask "what is one negative effect?"
+    - Prefer a scenario, comparison, explanation, or reasoning-based question.
+    - Create a situation where choosing or explaining the misconception would produce a meaningfully different answer from correct understanding.
+    - The learner should need to reason about the concept rather than repeat a fact from the source.
+    - Use a NEW question rather than repeating the previous question.
+    - Do not reveal the answer.
+    - Do not explicitly tell the learner what their misconception is.
+    - Do not make the question harder merely because the misconception exists.
+
+    If the adaptive target is "scaffolding":
+    - Keep the question manageable.
+    - Prefer explicit intermediate reasoning steps.
+
+    If the adaptive target is "example_application":
+    - Use a concrete example requiring application of the concept.
+
+    If the adaptive target is "prerequisite":
+    - Test the prerequisite concept needed for the current target.
+    - Keep the question easy unless otherwise specified.
+
+    If the adaptive target is "retention":
+    - Focus on retrieval of the concept rather than introducing new material.
+
+    If the adaptive target is "confidence":
+    - Use a clear, solvable conceptual question that lets the learner demonstrate understanding.
+
+    If the adaptive target is "practice":
+    - Give a meaningful application problem appropriate to the learner's current level.
+
+    If the adaptive target is "advanced_application":
+    - Require deeper reasoning, transfer, or multi-step application.
     """
 
         if adaptive_plan.get("misconception"):
             adaptive_instruction += f"""
-    Known learner misconception:
-    {adaptive_plan["misconception"]}
+
+    KNOWN LEARNER MISCONCEPTION:
+
+    Misconception:
+    {adaptive_plan.get("misconception", "")}
 
     Evidence:
     {adaptive_plan.get("evidence", "")}
 
-    Create questions that specifically test whether the learner
-    understands this misconception correctly.
-    Do not reveal the answer in the question.
+    Suggested intervention:
+    {adaptive_plan.get("suggested_intervention", "")}
+
+    Create a diagnostic question that specifically tests whether the learner
+    has corrected this misconception.
+
+    The question must distinguish between:
+    A) the learner's previously observed misconception, and
+    B) the scientifically/historically supported understanding in the source material.
+
+    The learner must demonstrate reasoning, explanation, comparison, or application
+    that reveals which understanding they hold.
+
+    Do NOT simply ask the learner to state the correct fact.
+
+    The question should be answerable using the source material.
+
+    Do NOT:
+    - repeat the exact previous question
+    - reveal the answer
+    - explicitly state the misconception to the learner
+    - make the question harder merely because the misconception exists
+
+    The question should provide evidence about whether the learner
+    now understands the concept correctly.
     """
 
     custom_instruction = f"""
-Generate exactly {count} questions.
+    Generate exactly {count} questions.
 
-Required difficulty: {difficulty}
+    IMPORTANT: This is an ADAPTIVE quiz.
 
-Difficulty rules:
-- easy = direct recall, definition, or identification
-- medium = explanation, comparison, or straightforward application
-- hard = reasoning, application, analysis, or multi-step thinking
+    The adaptive learning plan is the primary instruction for question selection.
+    The source material is used to ensure factual grounding, but do NOT simply
+    generate generic questions from the chapter.
 
-For HARD questions:
-- Do NOT ask simple definition questions.
-- Do NOT ask direct identification questions.
-- Require the student to apply, compare, explain why/how, or reason through a situation.
+    TARGET CONCEPT:
+    {adaptive_plan.get("concept", "")}
 
-Every question MUST contain:
-- a non-empty concept
-- a difficulty field
-- difficulty exactly equal to "{difficulty}"
+    ADAPTIVE TARGET:
+    {adaptive_plan.get("target", "")}
 
-Never return null or empty concept.
-Never label a simple recall question as hard.
+    QUESTION TYPE:
+    {adaptive_plan.get("question_type", "conceptual")}
 
-""" + adaptive_instruction
+    REQUIRED DIFFICULTY:
+    {difficulty}
+
+    ADAPTIVE REASON:
+    {adaptive_plan.get("reason", "")}
+
+    Rules for question generation:
+
+    1. Every question MUST primarily assess the TARGET CONCEPT.
+
+    1a.If the adaptive target is "misconception", the question MUST primarily
+   diagnose the specific MISCONCEPTION rather than merely covering the topic.
+
+    2. Every question MUST follow the specified QUESTION TYPE.
+
+    3. Every question MUST satisfy the REQUIRED DIFFICULTY.
+
+    4. Do NOT generate unrelated questions from other concepts in the chapter,
+    even if those concepts appear prominently in the source material.
+
+    5. If the adaptive target is "misconception", the question MUST test the
+    learner's identified misconception.
+
+    6. If the adaptive target is "advanced_application", the question must
+    require transfer, deeper reasoning, or application in a new situation.
+
+    7. If the adaptive target is "practice", the question must require
+    application of the target concept.
+
+    8. If the adaptive target is "review", the question should reinforce
+    understanding of the target concept.
+
+    9. If the adaptive target is "retention", test retrieval of the target concept.
+
+    10. If the adaptive target is "confidence", use a clear conceptual question
+        that allows the learner to demonstrate understanding.
+
+    11. Do not merely copy sentences or questions from the source material.
+
+    12. When generating multiple questions, vary the scenario, wording, and
+        reasoning while keeping the same target concept.
+
+    Difficulty rules:
+    - easy = direct recall, simple conceptual understanding, or straightforward reasoning
+    - medium = explanation, comparison, application, or moderate reasoning
+    - hard = analysis, transfer, multi-step reasoning, or complex application
+
+    For HARD questions:
+    - Do NOT ask simple definition questions.
+    - Do NOT ask direct identification questions.
+    - Require application, comparison, explanation, analysis, or reasoning.
+
+    Every question MUST contain:
+    - a non-empty concept
+    - a difficulty field
+    - difficulty exactly equal to "{difficulty}"
+
+    Every generated question MUST use:
+    concept = "{adaptive_plan.get("concept", "")}"
+
+    Never return null or empty concept.
+    Never label a simple recall question as hard.
+
+    """ + adaptive_instruction
     
     generator = Generator(json_mode=True)
     try:

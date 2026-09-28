@@ -235,6 +235,7 @@ Generate Quiz
 
 // Active Quiz View (One by One)
 const allQuestions = mcq // focusing on MCQ for this smooth interactive UI
+
 const q = allQuestions[currentQuestionIndex]
 if (!q && sa.length === 0) return null
 
@@ -319,6 +320,15 @@ Score: {result.score}/10
 
 return (
 <div className="flex flex-col gap-6 w-full max-w-2xl mx-auto py-6">
+  <div className="flex justify-end">
+  <button
+    onClick={handleGenerate}
+    disabled={generating}
+    className="px-4 py-2 rounded-lg bg-[var(--accent-purple)] text-white text-sm font-medium hover:opacity-90 disabled:opacity-50"
+  >
+    {generating ? 'Generating...' : 'Generate New Adaptive Quiz'}
+  </button>
+</div>
 <div className="flex justify-between items-center text-sm font-medium text-[var(--text-secondary)] mb-2">
 <span>Question {currentQuestionIndex + 1} of {allQuestions.length}</span>
 <span className="px-3 py-1 bg-[var(--bg-elevated)] rounded-full border border-[var(--border)]">
@@ -652,24 +662,6 @@ className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--ra
 >
 Start Targeted Misconception Review
 </button>
-
-{reassessmentLoading === question.id ? (
-<p className="mt-3 text-sm text-white/60">
-Generating a fresh checking question...
-</p>
-) : (
-<button
-onClick={() =>
-handleGenerateReassessment(
-question.id,
-result.learning_path?.concept || question.concept
-)
-}
-className="mt-3 ml-2 px-4 py-2 bg-white/10 text-white rounded-[var(--radius)] text-sm font-medium hover:opacity-90 transition-opacity"
->
-Re-assess My Understanding
-</button>
-)}
 </>
 )}
 
