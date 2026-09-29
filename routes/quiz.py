@@ -1,3 +1,6 @@
+from utils.auth import require_session_owner
+from difflib import SequenceMatcher
+import re
 from agents.adaptive_orchestrator import get_next_learning_action
 from flask import Blueprint, jsonify, request
 from agents.mastery_engine import update_mastery_from_assessment
@@ -30,9 +33,48 @@ from agents.concept_registry import (
     get_canonical_concept,
     get_canonical_concepts,
 )
+
+def normalize_question(text):
+    text = text.lower().strip()
+    text = re.sub(r"[^a-z0-9\s]", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
+def is_similar_question(question, previous_questions, threshold=0.72):
+    stop_words = {
+        "what", "whats", "is", "are", "do", "does", "did", "the", "a", "an",
+        "of", "in", "to", "for", "on", "with", "how", "why", "who", "where",
+        "when", "explain", "describe", "define", "compare", "contrast",
+        "and", "or"
+    }
+
+    def get_keywords(text):
+        normalized = normalize_question(text)
+        return set(word for word in normalized.split() if word not in stop_words)
+
+    q1_keys = get_keywords(question)
+    if not q1_keys:
+        return False
+
+    for previous in previous_questions:
+        q2_keys = get_keywords(previous)
+        if not q2_keys:
+            continue
+
+        intersection = len(q1_keys & q2_keys)
+        union = len(q1_keys | q2_keys)
+        jaccard = intersection / union if union > 0 else 0
+
+        if jaccard >= threshold:
+            return True
+
+    return False
+
 quiz_bp = Blueprint('quiz', __name__)
 
 @quiz_bp.route('/quiz/<session_id>', methods=['GET'])
+@require_session_owner
 def get_quiz(session_id):
     valid, error = validate_session_id(session_id)
     if not valid:
@@ -46,6 +88,7 @@ def get_quiz(session_id):
     return jsonify(quiz)
 
 @quiz_bp.route('/quiz/generate/<session_id>', methods=['POST'])
+@require_session_owner
 def generate_quiz(session_id):
     valid, error = validate_session_id(session_id)
     if not valid:
@@ -53,7 +96,49 @@ def generate_quiz(session_id):
     if session_id not in session_store:
         return jsonify({"error": "not_found"}), 404
         
+    session_data = session_store[session_id]
+
+    previous_quiz = session_data.get("quiz")
+    question_history = session_data.get("quiz_history", [])
     full_text = session_store[session_id].get("full_text", "")
+
+    # Collect questions from previous quiz generations
+    previous_questions = []
+
+    for old_quiz in question_history[-5:]:
+        if not isinstance(old_quiz, dict):
+            continue
+
+        for item in old_quiz.get("mcq", []):
+            if isinstance(item, dict):
+                question = item.get("question") or item.get("q")
+                if question:
+                    previous_questions.append(question)
+
+        for item in old_quiz.get("short_answer", []):
+            if isinstance(item, dict):
+                question = item.get("question") or item.get("q")
+                if question:
+                    previous_questions.append(question)
+
+    # Also include the currently active quiz
+    if previous_quiz:
+        for item in previous_quiz.get("mcq", []):
+            if isinstance(item, dict):
+                question = item.get("question") or item.get("q")
+                if question:
+                    previous_questions.append(question)
+
+        for item in previous_quiz.get("short_answer", []):
+            if isinstance(item, dict):
+                question = item.get("question") or item.get("q")
+                if question:
+                    previous_questions.append(question)
+
+    previous_questions_text = "\n".join(
+        f"- {question}" for question in previous_questions
+    )
+
     valid, error = validate_extracted_text(full_text, max_length=None)
     if not valid:
         return jsonify({"error": "no_text"}), 400
@@ -102,6 +187,16 @@ def generate_quiz(session_id):
 
     Reason for this adaptation:
     {adaptive_plan.get("reason", "")}
+
+    PREVIOUSLY ASKED QUESTIONS:
+{previous_questions_text if previous_questions_text else "None"}
+
+QUESTION NOVELTY RULES:
+
+- Do NOT repeat any previously asked question.
+- Do NOT merely rephrase a previously asked question.
+- Create a genuinely different scenario, context, reasoning path, or application.
+- The new question must still assess the TARGET CONCEPT and ADAPTIVE TARGET.
 
     Generate the question so that it follows BOTH the adaptive target
     and the question type.
@@ -209,6 +304,31 @@ def generate_quiz(session_id):
     now understands the concept correctly.
     """
 
+        previous_questions = []
+
+        for old_quiz in question_history[-5:]:
+            for q in old_quiz.get("mcq", []):
+                if q.get("question"):
+                    previous_questions.append(q["question"])
+
+            for q in old_quiz.get("short_answer", []):
+                if q.get("question"):
+                    previous_questions.append(q["question"])
+
+        if previous_quiz:
+            for q in previous_quiz.get("mcq", []):
+                if q.get("question"):
+                    previous_questions.append(q["question"])
+
+            for q in previous_quiz.get("short_answer", []):
+                if q.get("question"):
+                    previous_questions.append(q["question"])
+
+        previous_questions_text = "\n".join(
+            f"- {question}"
+            for question in previous_questions[-20:]
+        )
+
     custom_instruction = f"""
     Generate exactly {count} questions.
 
@@ -294,18 +414,68 @@ def generate_quiz(session_id):
     
     generator = Generator(json_mode=True)
     try:
-        def generate_json(prompt_template, text):
-            try:
-                prompt = prompt_template + custom_instruction
-                res = generator.chain.invoke({"context": text, "question": prompt})
-                from utils.json_helper import extract_json
-                return extract_json(res)
-            except Exception:
-                pass
-            return None
+        def generate_and_filter(prompt_template, existing_qs, target_count, key_name):
+            valid_questions = []
+            seen = list(existing_qs)
+            attempts = 0
+            
+            while len(valid_questions) < target_count and attempts < 3:
+                needed = target_count - len(valid_questions)
+                current_instruction = custom_instruction.replace(
+                    f"Generate exactly {count} questions.", 
+                    f"Generate exactly {needed} questions."
+                )
+                prompt = prompt_template + current_instruction
+                
+                try:
+                    raw = generator.chain.invoke({"context": full_text, "question": prompt})
+                    from utils.json_helper import extract_json
+                    res = extract_json(raw)
+                    if res and key_name in res:
+                        for q in res[key_name]:
+                            q_text = q.get("question", "")
+                            if q_text and not is_similar_question(q_text, seen):
+                                valid_questions.append(q)
+                                seen.append(q_text)
+                                if len(valid_questions) == target_count:
+                                    break
+                except Exception as e:
+                    print("Generation loop error:", repr(e))
+                attempts += 1
+                
+            if len(valid_questions) < target_count:
+                raise RuntimeError(
+                    f"Insufficient novel questions generated for {key_name}. "
+                    f"Requested {target_count}, but only {len(valid_questions)} met novelty and adaptive constraints after {attempts} attempts."
+                )
+                
+            return {key_name: valid_questions}
 
-        mcq = generate_json(QUIZ_MCQ_PROMPT, full_text) or {"mcq": []}
-        sa = generate_json(QUIZ_SHORT_ANSWER_PROMPT, full_text) or {"short_answer": []}
+        mcq = generate_and_filter(QUIZ_MCQ_PROMPT, previous_questions, count, "mcq")
+        
+        # Combine previous questions with newly generated MCQs to ensure SAs don't overlap with MCQs
+        mcq_questions = [q.get("question", "") for q in mcq.get("mcq", [])]
+        sa = generate_and_filter(QUIZ_SHORT_ANSWER_PROMPT, previous_questions + mcq_questions, count, "short_answer")
+
+        previous_questions = []
+
+        for old_quiz in question_history:
+            for q in old_quiz.get("mcq", []):
+                if q.get("question"):
+                    previous_questions.append(q["question"])
+
+            for q in old_quiz.get("short_answer", []):
+                if q.get("question"):
+                    previous_questions.append(q["question"])
+
+        if previous_quiz:
+            for q in previous_quiz.get("mcq", []):
+                if q.get("question"):
+                    previous_questions.append(q["question"])
+
+            for q in previous_quiz.get("short_answer", []):
+                if q.get("question"):
+                    previous_questions.append(q["question"])
 
         adaptive_concept = adaptive_plan.get("concept")
 
@@ -336,15 +506,38 @@ def generate_quiz(session_id):
             if not s["concept"]:
                 raise ValueError("Generated short-answer question has invalid concept.")
             
-        quiz = {"mcq": mcq.get("mcq", []), "short_answer": sa.get("short_answer", [])}
-        session_data = session_store[session_id]
+            quiz = {
+                "mcq": mcq.get("mcq", []),
+                "short_answer": sa.get("short_answer", [])
+            }
+
+            # Preserve the previously generated quiz before replacing it.
+        # Preserve the previously generated quiz before replacing it.
+        if previous_quiz:
+            question_history.append(previous_quiz)
+
+        # Keep only the most recent 5 quiz generations
+        session_data["quiz_history"] = question_history[-5:]
+
+        # Store the newly generated quiz as the active quiz.
         session_data["quiz"] = quiz
+
         session_store[session_id] = session_data
-        return jsonify({**quiz,"adaptive_plan": adaptive_plan,"adaptive_context": adaptive_context,})
+
+        return jsonify({
+            **quiz,
+            "adaptive_plan": adaptive_plan,
+            "adaptive_context": adaptive_context,
+        })
+
+    except RuntimeError as e:
+        return json_error(str(e))
     except Exception as e:
-        return jsonify({"error": "generation_failed", "message": str(e)}), 500
+        print("🔥 QUIZ GENERATION ERROR:", repr(e))
+        raise
 
 @quiz_bp.route('/quiz/reassess/<session_id>', methods=['POST'])
+@require_session_owner
 def generate_reassessment(session_id):
     valid, error = validate_session_id(session_id)
 
@@ -427,6 +620,7 @@ def generate_reassessment(session_id):
         }), 500
 
 @quiz_bp.route('/quiz/grade', methods=['POST'])
+@require_session_owner
 def grade_answer():
     data, parse_error = parse_json_request(request)
 
@@ -441,6 +635,18 @@ def grade_answer():
     sample_answer = data.get("sample_answer") or ""
 
     concept_input = data.get("concept")
+    targeted_misconception = data.get("misconception")
+    targeted_misconception_text = None
+    if targeted_misconception:
+        if isinstance(targeted_misconception, dict):
+            targeted_misconception_text = targeted_misconception.get("misconception")
+        else:
+            targeted_misconception_text = str(targeted_misconception)
+
+    if not targeted_misconception_text and is_reassessment:
+        active = get_active_misconceptions(session_id, concept_input or "")
+        if active:
+            targeted_misconception_text = active[0].get("misconception")
 
     if concept_input:
         concept = get_canonical_concept(str(concept_input))
@@ -501,6 +707,13 @@ def grade_answer():
                 correct=True,
             )
             grading["mastery_update"] = mastery_result
+
+            if is_reassessment:
+                resolve_misconceptions(
+                    session_id=session_id,
+                    concept=concept,
+                    misconception_text=targeted_misconception_text,
+                )
 
             if confidence_rating is not None:
                 record_metacognitive_checkin(
@@ -574,9 +787,14 @@ def grade_answer():
             repr(res)
         )
 
-        score = float(
-            grading.get("score", 0) or 0
-        )
+        raw_score = grading.get("score", 0)
+        try:
+            score = float(raw_score)
+        except (ValueError, TypeError):
+            match = re.search(r"(\d+(\.\d+)?)", str(raw_score))
+            score = float(match.group(1)) if match else 0.0
+            
+        grading["score"] = score
 
         # Detect misconception for incorrect answers.
         print("🔥 SCORE DEBUG:", score, "IS_REASSESSMENT:", is_reassessment)
@@ -661,6 +879,7 @@ def grade_answer():
                 resolve_misconceptions(
                     session_id=session_id,
                     concept=concept,
+                    misconception_text=targeted_misconception_text,
                 )
 
             if confidence_rating is not None:
@@ -690,6 +909,7 @@ def grade_answer():
         }), 500
 
 @quiz_bp.route('/quiz/metacognitive', methods=['POST'])
+@require_session_owner
 def save_metacognitive_checkin():
     data, parse_error = parse_json_request(request)
 
@@ -733,6 +953,7 @@ def save_metacognitive_checkin():
     })
 
 @quiz_bp.route('/quiz/intervention-grade', methods=['POST'])
+@require_session_owner
 def grade_intervention_answer():
     """
     Grade the learner's answer to a checking question inside an
@@ -746,8 +967,14 @@ def grade_intervention_answer():
     concept_input = data.get("concept", "")
     question = data.get("question", "")
     user_answer = data.get("user_answer", "")
-    misconception = data.get("misconception")
-
+    misconception_payload = data.get("misconception")
+    targeted_misconception_text = None
+    
+    if misconception_payload:
+        if isinstance(misconception_payload, dict):
+            targeted_misconception_text = misconception_payload.get("misconception")
+        else:
+            targeted_misconception_text = str(misconception_payload)
     if not session_id or not question or not user_answer:
         return json_error("session_id, question and user_answer are required")
 
@@ -829,8 +1056,12 @@ the student used relevant terminology.
         )
 
         # Successful intervention = resolve the active misconception.
-        if correct and score >= 7:
-            resolve_misconceptions(session_id, concept)
+        if correct and score >= 7 and targeted_misconception_text:
+            resolve_misconceptions(
+                session_id=session_id,
+                concept=concept,
+                misconception_text=targeted_misconception_text
+            )
 
         # Failed intervention = retain/update misconception memory.
         elif detected_misconception:

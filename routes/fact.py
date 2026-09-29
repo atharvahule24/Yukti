@@ -1,3 +1,4 @@
+from utils.auth import require_session_owner
 from flask import Blueprint, jsonify
 from routes.store import session_store
 from llm.generator import Generator
@@ -5,6 +6,7 @@ from llm.generator import Generator
 fact_bp = Blueprint('fact', __name__)
 
 @fact_bp.route('/fact/<session_id>', methods=['GET'])
+@require_session_owner
 def get_fact(session_id):
     if session_id not in session_store:
         return jsonify({"fact": "Did you know that spaced repetition can dramatically improve long-term memory retention?"})

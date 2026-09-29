@@ -1,3 +1,4 @@
+from utils.auth import require_session_owner
 from flask import Blueprint, jsonify
 from routes.store import session_store
 from utils.json_safe import json_error
@@ -6,6 +7,7 @@ from utils.validation import validate_session_id
 notes_bp = Blueprint('notes', __name__)
 
 @notes_bp.route('/notes/<session_id>', methods=['GET'])
+@require_session_owner
 def get_notes(session_id):
     valid, error = validate_session_id(session_id)
     if not valid:
@@ -19,6 +21,7 @@ def get_notes(session_id):
     return jsonify(notes)
 
 @notes_bp.route('/notes/generate/<session_id>', methods=['POST'])
+@require_session_owner
 def generate_notes(session_id):
     valid, error = validate_session_id(session_id)
     if not valid:

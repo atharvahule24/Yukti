@@ -1,3 +1,4 @@
+from utils.auth import require_session_owner
 import json
 from flask import Blueprint, request, Response, stream_with_context, jsonify
 from agents.rag_workflow import RagWorkflow
@@ -7,6 +8,7 @@ chat_bp = Blueprint('chat', __name__)
 rag_workflow = RagWorkflow()
 
 @chat_bp.route('/chat/history/<session_id>', methods=['GET'])
+@require_session_owner
 def chat_history(session_id):
     try:
         history = get_history(session_id, limit=50)
@@ -27,6 +29,7 @@ def chat_history(session_id):
         return jsonify({"error": str(e)}), 500
 
 @chat_bp.route('/chat', methods=['GET'])
+@require_session_owner
 def chat():
     message = request.args.get('message', '')
     session_id = request.args.get('session_id', '')

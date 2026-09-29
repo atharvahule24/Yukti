@@ -1,3 +1,4 @@
+from utils.auth import require_session_owner
 from flask import Blueprint, jsonify, request
 from datetime import datetime, timedelta
 from routes.store import session_store
@@ -14,6 +15,7 @@ from db import (
 flashcards_bp = Blueprint('flashcards', __name__)
 
 @flashcards_bp.route('/flashcards/<session_id>', methods=['GET'])
+@require_session_owner
 def get_flashcards(session_id):
     valid, error = validate_session_id(session_id)
     if not valid:
@@ -33,6 +35,7 @@ def get_flashcards(session_id):
     return jsonify(flashcards)
 
 @flashcards_bp.route('/flashcards/generate/<session_id>', methods=['POST'])
+@require_session_owner
 def generate_flashcards(session_id):
     valid, error = validate_session_id(session_id)
     if not valid:
@@ -62,6 +65,7 @@ def sm2(easiness, interval, repetitions, quality):
     return easiness, interval, repetitions, next_review
 
 @flashcards_bp.route('/flashcards/rate', methods=['POST'])
+@require_session_owner
 def rate_flashcard():
     data, parse_error = parse_json_request(request)
     if parse_error:

@@ -12,6 +12,7 @@ from retrieval.vector_store import VectorStore
 
 from db import init_db
 from flask_cors import CORS
+from routes.auth import auth_bp
 from routes.upload import upload_bp
 from routes.chat import chat_bp
 from routes.graph import graph_bp
@@ -24,7 +25,11 @@ from routes.learner import learner_bp
 
 from celery_app import celery
 
-init_db()
+# Do not run init_db() automatically if we don't want to touch Yukti.db yet,
+# but the instructions say "Do NOT run init_db() against the real Yukti.db yet."
+# Wait, if app.py has `init_db()` at the top level, importing `app` will run it!
+# I should remove the global `init_db()` call from app.py to prevent it from touching Yukti.db.
+# I will move it to `if __name__ == '__main__':` or remove it.
 
 app = Flask(__name__)
 allowed_origins = os.getenv(
@@ -33,6 +38,7 @@ allowed_origins = os.getenv(
 ).split(",")
 CORS(app, origins=[origin.strip() for origin in allowed_origins if origin.strip()])
 
+app.register_blueprint(auth_bp, url_prefix='/api')
 app.register_blueprint(upload_bp, url_prefix='/api')
 app.register_blueprint(chat_bp, url_prefix='/api')
 app.register_blueprint(graph_bp, url_prefix='/api')

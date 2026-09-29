@@ -5,17 +5,44 @@ from datetime import datetime, timedelta
 from typing import Any
 import re
 
+from contextlib import contextmanager
+
 DB_PATH = os.path.join(os.path.dirname(__file__), "Yukti.db")
 
 
+@contextmanager
 def get_conn():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def init_db():
     with get_conn() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                username TEXT UNIQUE NOT NULL,
+                password_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS auth_tokens (
+                token TEXT PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+            """
+        )
         conn.execute(
             """
             CREATE TABLE IF NOT EXISTS sessions (
@@ -23,10 +50,17 @@ def init_db():
                 filename TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 text TEXT NOT NULL,
-                data TEXT NOT NULL
+                data TEXT NOT NULL,
+                user_id INTEGER,
+                FOREIGN KEY (user_id) REFERENCES users(id)
             )
             """
         )
+        try:
+            conn.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER REFERENCES users(id)")
+        except sqlite3.OperationalError:
+            pass
+
 
         conn.execute(
     """
@@ -155,13 +189,19 @@ def _normalise_session(data: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
-def save_session_data(session_id: str, data: dict[str, Any]):
+def save_session_data(session_id: str, data: dict[str, Any], user_id: int | None = None):
     data = _normalise_session(dict(data))
     with get_conn() as conn:
+        # Get existing user_id if any, so we don't overwrite it with NULL on replace
+        existing = conn.execute("SELECT user_id FROM sessions WHERE session_id=?", (session_id,)).fetchone()
+        final_user_id = user_id
+        if existing and existing["user_id"] is not None:
+            final_user_id = existing["user_id"]
+            
         conn.execute(
             """
-            INSERT OR REPLACE INTO sessions (session_id, filename, created_at, text, data)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT OR REPLACE INTO sessions (session_id, filename, created_at, text, data, user_id)
+            VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 session_id,
@@ -169,9 +209,9 @@ def save_session_data(session_id: str, data: dict[str, Any]):
                 data["created_at"],
                 data["full_text"],
                 json.dumps(data),
+                final_user_id
             ),
         )
-
 
 def get_session_data(session_id: str) -> dict[str, Any] | None:
     with get_conn() as conn:
@@ -196,11 +236,16 @@ def get_session_data(session_id: str) -> dict[str, Any] | None:
     return data
 
 
-def list_session_data() -> list[dict[str, Any]]:
+def list_session_data(user_id: int | None = None) -> list[dict[str, Any]]:
     with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT session_id FROM sessions ORDER BY created_at DESC"
-        ).fetchall()
+        if user_id is not None:
+            rows = conn.execute(
+                "SELECT session_id FROM sessions WHERE user_id=? ORDER BY created_at DESC", (user_id,)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT session_id FROM sessions ORDER BY created_at DESC"
+            ).fetchall()
     return [data for row in rows if (data := get_session_data(row["session_id"]))]
 
 
@@ -691,6 +736,7 @@ def get_active_misconceptions(
 def resolve_misconceptions(
     session_id: str,
     concept: str,
+    misconception_text: str | None = None,
 ):
     """
     Mark active misconceptions for a concept as resolved
@@ -698,16 +744,29 @@ def resolve_misconceptions(
     """
 
     with get_conn() as conn:
-        conn.execute(
-            """
-            UPDATE misconceptions
-            SET resolved=1
-            WHERE session_id=?
-              AND LOWER(concept)=LOWER(?)
-              AND resolved=0
-            """,
-            (session_id, concept),
-        )
+        if misconception_text:
+            conn.execute(
+                """
+                UPDATE misconceptions
+                SET resolved=1
+                WHERE session_id=?
+                  AND LOWER(concept)=LOWER(?)
+                  AND LOWER(misconception)=LOWER(?)
+                  AND resolved=0
+                """,
+                (session_id, concept, misconception_text),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE misconceptions
+                SET resolved=1
+                WHERE session_id=?
+                  AND LOWER(concept)=LOWER(?)
+                  AND resolved=0
+                """,
+                (session_id, concept),
+            )
 
 def get_learner_state(session_id: str) -> list[dict]:
     with get_conn() as conn:

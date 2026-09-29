@@ -1,6 +1,7 @@
 import os
 import uuid
 from flask import Blueprint, request, jsonify
+from datetime import datetime
 
 from utils.json_safe import json_error, parse_json_request, require_keys
 from utils.validation import (
@@ -8,6 +9,8 @@ from utils.validation import (
     validate_upload_filename,
     validate_youtube_url,
 )
+from utils.auth import require_auth, get_current_user_id
+from db import save_session_data
 
 upload_bp = Blueprint('upload', __name__)
 
@@ -18,12 +21,15 @@ def allowed_file(filename):
     return validate_upload_filename(filename, ALLOWED_EXTENSIONS)[1] is None
 
 @upload_bp.route('/upload', methods=['POST'])
+@require_auth
 def upload():
     try:
         from tasks import process_upload
 
         session_id = str(uuid.uuid4())
         os.makedirs('uploads', exist_ok=True)
+        user_id = get_current_user_id()
+        now = datetime.utcnow().isoformat()
 
         if 'file' in request.files:
             file = request.files['file']
@@ -41,6 +47,14 @@ def upload():
             filepath = os.path.join('uploads', filename)
             file.save(filepath)
             title = filename
+            
+            save_session_data(session_id, {
+                "id": session_id,
+                "title": title,
+                "filename": original_filename,
+                "created_at": now,
+                "full_text": ""
+            }, user_id=user_id)
 
             task = process_upload.delay(session_id, filepath, title, original_filename)
 
@@ -57,6 +71,15 @@ def upload():
                 return jsonify({"error": "upload_failed", "message": error}), 400
 
             title = f"YouTube Video ({url})"
+            
+            save_session_data(session_id, {
+                "id": session_id,
+                "title": title,
+                "filename": title,
+                "created_at": now,
+                "full_text": ""
+            }, user_id=user_id)
+            
             task = process_upload.delay(
                 session_id, None, title, title, is_youtube=True, youtube_url=url
             )
