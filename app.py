@@ -25,13 +25,8 @@ from routes.learner import learner_bp
 
 from celery_app import celery
 
-# Do not run init_db() automatically if we don't want to touch Yukti.db yet,
-# but the instructions say "Do NOT run init_db() against the real Yukti.db yet."
-# Wait, if app.py has `init_db()` at the top level, importing `app` will run it!
-# I should remove the global `init_db()` call from app.py to prevent it from touching Yukti.db.
-# I will move it to `if __name__ == '__main__':` or remove it.
-
 app = Flask(__name__)
+init_db()
 allowed_origins = os.getenv(
     "ALLOWED_ORIGINS",
     "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174",
@@ -48,8 +43,12 @@ app.register_blueprint(notes_bp, url_prefix='/api')
 app.register_blueprint(sessions_bp, url_prefix='/api')
 app.register_blueprint(fact_bp, url_prefix='/api')
 app.register_blueprint(learner_bp, url_prefix='/api')
+from werkzeug.exceptions import HTTPException
+
 @app.errorhandler(Exception)
 def handle_exception(e):
+    if isinstance(e, HTTPException):
+        return jsonify({"error": e.name, "message": e.description}), e.code
     return jsonify({"error": "server_error", "message": str(e)}), 500
 
 

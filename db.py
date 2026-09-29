@@ -7,7 +7,8 @@ import re
 
 from contextlib import contextmanager
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "Yukti.db")
+DATA_DIR = os.getenv("DATA_DIR", os.path.dirname(__file__))
+DB_PATH = os.path.join(DATA_DIR, "Yukti.db")
 
 
 @contextmanager
@@ -996,4 +997,111 @@ def get_learning_analytics(session_id: str) -> dict:
         "weak_concept_details": weak_concepts,
         "due_review_details": due_reviews,
         "misconceptions": misconceptions,
+    }
+
+def get_cumulative_learning_analytics(user_id: int) -> dict:
+    """
+    Return a cumulative adaptive-learning summary across all sessions for a user.
+    """
+    with get_conn() as conn:
+        states = conn.execute(
+            """
+            SELECT
+                ls.concept,
+                AVG(ls.mastery) as mastery,
+                AVG(ls.confidence) as confidence,
+                SUM(ls.attempts) as attempts,
+                SUM(ls.correct_attempts) as correct_attempts,
+                AVG(ls.recent_score) as recent_score,
+                SUM(ls.needs_examples) as needs_examples,
+                SUM(ls.needs_step_by_step) as needs_step_by_step,
+                MAX(ls.updated_at) as updated_at,
+                MAX(ls.last_reviewed_at) as last_reviewed_at,
+                MIN(ls.next_review_at) as next_review_at,
+                AVG(ls.review_interval_days) as review_interval_days
+            FROM learner_state ls
+            JOIN sessions s ON ls.session_id = s.session_id
+            WHERE s.user_id = ?
+            GROUP BY ls.concept
+            ORDER BY mastery DESC
+            """,
+            (user_id,),
+        ).fetchall()
+
+    state_list = [dict(row) for row in states]
+    total_concepts = len(state_list)
+    average_mastery = (
+        sum(item["mastery"] for item in state_list) / total_concepts
+        if total_concepts
+        else 0.0
+    )
+    average_confidence = (
+        sum(item["confidence"] for item in state_list) / total_concepts
+        if total_concepts
+        else 0.5
+    )
+
+    mastered_concepts = [item for item in state_list if item["mastery"] >= 70]
+    weak_concepts = [item for item in state_list if item["mastery"] < 70]
+    
+    import datetime
+    now_iso = datetime.datetime.utcnow().isoformat()
+    due_reviews = [
+        item for item in state_list
+        if item["next_review_at"] and item["next_review_at"] <= now_iso
+    ]
+
+    with get_conn() as conn:
+        misc = conn.execute(
+            """
+            SELECT
+                m.id,
+                m.concept,
+                m.misconception,
+                m.severity,
+                SUM(m.occurrences) as occurrences,
+                MAX(m.resolved) as resolved,
+                m.suggested_intervention
+            FROM misconceptions m
+            JOIN sessions s ON m.session_id = s.session_id
+            WHERE s.user_id = ?
+            GROUP BY m.concept, m.misconception
+            ORDER BY occurrences DESC
+            """,
+            (user_id,),
+        ).fetchall()
+
+    misc_list = [dict(row) for row in misc]
+    active_misc = [m for m in misc_list if not m["resolved"]]
+    resolved_misc = [m for m in misc_list if m["resolved"]]
+
+    return {
+        "overall_mastery": average_mastery,
+        "average_confidence": average_confidence,
+        "total_concepts": total_concepts,
+        "mastered_concepts": len(mastered_concepts),
+        "weak_concepts": len(weak_concepts),
+        "due_reviews": len(due_reviews),
+        "active_misconceptions": len(active_misc),
+        "resolved_misconceptions": len(resolved_misc),
+        "concepts": state_list,
+        "weak_concept_details": [
+            {
+                "concept": c["concept"],
+                "mastery": c["mastery"],
+                "confidence": c["confidence"]
+            }
+            for c in weak_concepts
+        ],
+        "due_review_details": [
+            {
+                "concept": c["concept"],
+                "mastery": c["mastery"],
+                "confidence": c["confidence"],
+                "next_review_at": c["next_review_at"]
+            }
+            for c in due_reviews
+        ],
+        "misconceptions": active_misc,
+        "resolved_misconceptions_list": resolved_misc,
     }

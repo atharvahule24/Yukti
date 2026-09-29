@@ -5,11 +5,16 @@ from db import get_conn
 def require_auth(f):
     @functools.wraps(f)
     def decorated_function(*args, **kwargs):
+        token = None
         auth_header = request.headers.get("Authorization")
-        if not auth_header or not auth_header.startswith("Bearer "):
+        if auth_header and auth_header.startswith("Bearer "):
+            token = auth_header.split(" ")[1]
+        else:
+            token = request.args.get("token")
+            
+        if not token:
             return jsonify({"error": "unauthorized", "message": "Missing or invalid token"}), 401
         
-        token = auth_header.split(" ")[1]
         with get_conn() as conn:
             row = conn.execute("SELECT user_id FROM auth_tokens WHERE token=?", (token,)).fetchone()
             if not row:

@@ -5,7 +5,7 @@ import { FileUploader } from '../components/ui/file-uploader'
 import {
   getSessions,
   deleteSession,
-  getLearnerAnalytics,
+  getCumulativeLearnerAnalytics,
   getNextLearningAction,
 } from '../lib/api'
 
@@ -26,7 +26,9 @@ Brain,
 Target,
 AlertTriangle,
 RotateCcw,
+LogOut,
 } from 'lucide-react'
+import { removeToken } from '../lib/auth'
 
 export function Dashboard() {
 const navigate = useNavigate()
@@ -46,6 +48,16 @@ parseInt(localStorage.getItem('sb_streak') || '0', 10)
 )
 
 useEffect(() => {
+getCumulativeLearnerAnalytics()
+  .then(data => {
+    setAnalytics(data)
+    setAnalyticsLoading(false)
+  })
+  .catch(err => {
+    console.error('Failed to load cumulative analytics:', err)
+    setAnalyticsLoading(false)
+  })
+
 getSessions()
 .then(async data => {
 const recentSessions = data.sessions.slice(0, 5)
@@ -55,16 +67,6 @@ setLoading(false)
 
 if (recentSessions.length > 0) {
   const sessionId = recentSessions[0].id
-
-  try {
-  const learnerAnalytics = await getLearnerAnalytics(sessionId)
-  setAnalytics(learnerAnalytics)
-} catch (error) {
-  console.error(
-    'Failed to load learner analytics:',
-    error
-  )
-}
 
 try {
   const learnerNextAction = await getNextLearningAction(sessionId)
@@ -77,7 +79,6 @@ try {
 }
 }
 
-setAnalyticsLoading(false)
 setNextActionLoading(false)
 })
 .catch(error => {
@@ -105,8 +106,21 @@ console.error(err)
 }
 }
 
+const handleLogout = () => {
+  removeToken()
+  navigate('/auth')
+}
+
 return (
 <div className="min-h-screen bg-[var(--bg-base)] text-[var(--text-primary)] flex flex-col items-center py-12 px-4 relative overflow-hidden">
+
+<button
+  onClick={handleLogout}
+  className="absolute top-4 right-4 z-50 flex items-center gap-2 px-3 py-1.5 rounded-full bg-[var(--bg-elevated)] border border-[var(--border)] text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:border-[var(--border-highlight)] transition-all"
+>
+  <LogOut size={16} />
+  <span>Sign out</span>
+</button>
 
 {/* Background decoration */}
 
@@ -176,14 +190,14 @@ Learner Progress
 </h2>
 
 <span className="text-xs text-[var(--text-secondary)]">
-Latest study session
+Cumulative across all sessions
 </span>
 
 </div>
 
 {/* Summary cards */}
 
-<div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+<div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
 
 <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-5">
 
@@ -231,12 +245,24 @@ Weak Concepts
 
 <AlertTriangle size={16} />
 
-Misconceptions
+Active Misc.
 
 </div>
 
 <div className="text-2xl font-bold">
 {analytics.active_misconceptions}
+</div>
+
+</div>
+
+<div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-5">
+
+<div className="flex items-center gap-2 text-[var(--text-secondary)] text-sm mb-2">
+Resolved
+</div>
+
+<div className="text-2xl font-bold text-[var(--accent-purple)]">
+{analytics.resolved_misconceptions}
 </div>
 
 </div>

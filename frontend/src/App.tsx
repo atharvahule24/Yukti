@@ -2,10 +2,16 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import { Toaster } from 'sonner'
 import { Dashboard } from './pages/Dashboard'
 import { StudyChat } from './pages/StudyChat'
+import { Auth } from './pages/Auth'
+import { isAuthenticated } from './lib/auth'
 import { KnowledgeGraph } from './components/ui/knowledge-graph'
 import { FlashcardDecks } from './components/ui/flashcard-decks'
 import { QuizPanel } from './components/ui/quiz-panel'
 import { useParams } from 'react-router-dom'
+
+function PrivateRoute({ children }: { children: React.ReactNode }) {
+  return isAuthenticated() ? <>{children}</> : <Navigate to="/auth" />
+}
 
 // Wrapper components for standalone pages
 function GraphPage() {
@@ -63,11 +69,12 @@ color: 'var(--text-primary)',
 
 <BrowserRouter>
 <Routes>
-<Route path="/" element={<Dashboard />} />
-<Route path="/chat/:sessionId" element={<StudyChat />} />
-<Route path="/graph/:sessionId" element={<GraphPage />} />
-<Route path="/flashcards/:sessionId" element={<FlashcardsPage />} />
-<Route path="/quiz/:sessionId" element={<QuizPage />} />
+<Route path="/auth" element={<Auth />} />
+<Route path="/" element={<PrivateRoute><Dashboard /></PrivateRoute>} />
+<Route path="/chat/:sessionId" element={<PrivateRoute><StudyChat /></PrivateRoute>} />
+<Route path="/graph/:sessionId" element={<PrivateRoute><GraphPage /></PrivateRoute>} />
+<Route path="/flashcards/:sessionId" element={<PrivateRoute><FlashcardsPage /></PrivateRoute>} />
+<Route path="/quiz/:sessionId" element={<PrivateRoute><QuizPage /></PrivateRoute>} />
 <Route path="*" element={<Navigate to="/" />} />
 </Routes>
 </BrowserRouter>

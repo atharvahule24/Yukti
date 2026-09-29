@@ -18,3 +18,6 @@ unstructured
 sentence-transformers
 celery[redis]
 redis
+
+gunicorn
+supervisor

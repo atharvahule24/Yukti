@@ -2,9 +2,12 @@ import os
 from pydoc import doc
 from langchain_community.vectorstores import FAISS
 
+DATA_DIR = os.getenv("DATA_DIR", os.path.dirname(os.path.dirname(__file__)))
+DEFAULT_INDEX_PATH = os.path.join(DATA_DIR, "vector_store")
+
 class VectorStore:
 
-    def __init__(self, index_path="vector_store"):
+    def __init__(self, index_path=DEFAULT_INDEX_PATH):
         self.index_path = index_path
         self.vector_store = None
         self._embeddings_model = None

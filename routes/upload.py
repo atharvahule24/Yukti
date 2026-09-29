@@ -13,6 +13,8 @@ from utils.auth import require_auth, get_current_user_id
 from db import save_session_data
 
 upload_bp = Blueprint('upload', __name__)
+DATA_DIR = os.getenv("DATA_DIR", os.path.dirname(os.path.dirname(__file__)))
+UPLOADS_DIR = os.path.join(DATA_DIR, 'uploads')
 
 ALLOWED_EXTENSIONS = DEFAULT_ALLOWED_EXTENSIONS
 MAX_FILE_SIZE = int(os.getenv("MAX_UPLOAD_SIZE", 50 * 1024 * 1024))
@@ -27,7 +29,7 @@ def upload():
         from tasks import process_upload
 
         session_id = str(uuid.uuid4())
-        os.makedirs('uploads', exist_ok=True)
+        os.makedirs(UPLOADS_DIR, exist_ok=True)
         user_id = get_current_user_id()
         now = datetime.utcnow().isoformat()
 
@@ -44,7 +46,7 @@ def upload():
                 return jsonify({"error": "upload_failed", "message": "File too large"}), 400
 
             original_filename = file.filename
-            filepath = os.path.join('uploads', filename)
+            filepath = os.path.join(UPLOADS_DIR, filename)
             file.save(filepath)
             title = filename
             

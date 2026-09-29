@@ -1,5 +1,15 @@
+import { getToken } from './auth';
+
 export const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
+async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const token = getToken();
+  const headers = new Headers(init?.headers);
+  if (token) {
+    headers.set('Authorization', `Bearer ${token}`);
+  }
+  return fetch(input, { ...init, headers });
+}
 export interface Node {
   id: string;
   label: string;
@@ -106,7 +116,7 @@ export async function checkBackendHealth(): Promise<{
   version?: string;
   message?: string;
 }> {
-  const response = await fetch(`${BASE_URL}/health`);
+  const response = await apiFetch(`${BASE_URL}/health`);
   return handleResponse(response);
 }
 
@@ -119,7 +129,7 @@ export async function uploadFile(file: File): Promise<{
   const formData = new FormData();
   formData.append('file', file);
 
-  const response = await fetch(`${BASE_URL}/upload`, {
+  const response = await apiFetch(`${BASE_URL}/upload`, {
     method: 'POST',
     body: formData,
   });
@@ -136,7 +146,7 @@ export async function getTaskStatus(taskId: string): Promise<{
   };
   error?: string;
 }> {
-  const response = await fetch(`${BASE_URL}/task/${taskId}`)
+  const response = await apiFetch(`${BASE_URL}/task/${taskId}`)
   return handleResponse(response)
 }
 
@@ -146,7 +156,7 @@ export async function uploadYouTube(url: string): Promise<{
   title?: string;
   chunk_count?: number;
 }> {
-  const response = await fetch(`${BASE_URL}/upload`, {
+  const response = await apiFetch(`${BASE_URL}/upload`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ youtube_url: url }),
@@ -169,6 +179,11 @@ export function streamChat(
   url.searchParams.append('message', message)
   url.searchParams.append('session_id', sessionId)
   url.searchParams.append('mode', mode)
+
+  const token = getToken();
+  if (token) {
+    url.searchParams.append('token', token);
+  }
 
   console.log('STREAM CHAT START')
   console.log('BASE_URL:', BASE_URL)
@@ -240,32 +255,32 @@ export async function getChatHistory(sessionId: string): Promise<{
     content: string
   }>
 }> {
-  const response = await fetch(`${BASE_URL}/chat/history/${sessionId}`)
+  const response = await apiFetch(`${BASE_URL}/chat/history/${sessionId}`)
   return handleResponse(response)
 }
 
 export async function getGraph(sessionId: string): Promise<{nodes: Node[], links: Link[]}> {
-  const response = await fetch(`${BASE_URL}/graph/${sessionId}`);
+  const response = await apiFetch(`${BASE_URL}/graph/${sessionId}`);
   return handleResponse(response);
 }
 
 export async function generateGraph(sessionId: string): Promise<{nodes: Node[], links: Link[]}> {
-  const response = await fetch(`${BASE_URL}/graph/generate/${sessionId}`, { method: 'POST' });
+  const response = await apiFetch(`${BASE_URL}/graph/generate/${sessionId}`, { method: 'POST' });
   return handleResponse(response);
 }
 
 export async function getFlashcards(sessionId: string): Promise<{cards: Flashcard[]}> {
-  const response = await fetch(`${BASE_URL}/flashcards/${sessionId}`);
+  const response = await apiFetch(`${BASE_URL}/flashcards/${sessionId}`);
   return handleResponse(response);
 }
 
 export async function generateFlashcards(sessionId: string): Promise<{cards: Flashcard[]}> {
-  const response = await fetch(`${BASE_URL}/flashcards/generate/${sessionId}`, { method: 'POST' });
+  const response = await apiFetch(`${BASE_URL}/flashcards/generate/${sessionId}`, { method: 'POST' });
   return handleResponse(response);
 }
 
 export async function rateFlashcard(cardId: string, sessionId: string, mastery: number): Promise<{next_review: string}> {
-  const response = await fetch(`${BASE_URL}/flashcards/rate`, {
+  const response = await apiFetch(`${BASE_URL}/flashcards/rate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ card_id: cardId, session_id: sessionId, mastery }),
@@ -274,12 +289,12 @@ export async function rateFlashcard(cardId: string, sessionId: string, mastery: 
 }
 
 export async function getQuiz(sessionId: string): Promise<{mcq: MCQ[], short_answer: ShortAnswer[]}> {
-  const response = await fetch(`${BASE_URL}/quiz/${sessionId}`);
+  const response = await apiFetch(`${BASE_URL}/quiz/${sessionId}`);
   return handleResponse(response);
 }
 
 export async function generateQuiz(sessionId: string, options: { difficulty: string, count: number }): Promise<{mcq: MCQ[], short_answer: ShortAnswer[]}> {
-  const response = await fetch(`${BASE_URL}/quiz/generate/${sessionId}`, {
+  const response = await apiFetch(`${BASE_URL}/quiz/generate/${sessionId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(options),
@@ -291,7 +306,7 @@ export async function generateReassessment(
   sessionId: string,
   concept: string
 ): Promise<ShortAnswer> {
-  const response = await fetch(`${BASE_URL}/quiz/reassess/${sessionId}`, {
+  const response = await apiFetch(`${BASE_URL}/quiz/reassess/${sessionId}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ concept }),
@@ -300,7 +315,7 @@ export async function generateReassessment(
   return handleResponse(response);
 }
 
-export async function gradeAnswer(question: string, userAnswer: string, sampleAnswer: string, sessionId?: string, concept?: string, confidenceRating?: number, isReassessment?: boolean): Promise<GradeResult> {  const response = await fetch(`${BASE_URL}/quiz/grade`, {
+export async function gradeAnswer(question: string, userAnswer: string, sampleAnswer: string, sessionId?: string, concept?: string, confidenceRating?: number, isReassessment?: boolean): Promise<GradeResult> {  const response = await apiFetch(`${BASE_URL}/quiz/grade`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
 body: JSON.stringify({ question, user_answer: userAnswer, sample_answer: sampleAnswer, session_id: sessionId, concept, confidence_rating: confidenceRating, is_reassessment: isReassessment }),  });
@@ -318,7 +333,7 @@ export async function gradeInterventionAnswer(
   resolved?: boolean
   misconception?: string | null
 }> {
-  const response = await fetch(`${BASE_URL}/quiz/intervention-grade`, {
+  const response = await apiFetch(`${BASE_URL}/quiz/intervention-grade`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -339,7 +354,7 @@ export async function recordMetacognitiveCheckin(
   concept: string,
   confidenceRating: number
 ): Promise<{ learning_path: LearningPath }> {
-  const response = await fetch(`${BASE_URL}/quiz/metacognitive`, {
+  const response = await apiFetch(`${BASE_URL}/quiz/metacognitive`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -353,7 +368,7 @@ export async function recordMetacognitiveCheckin(
 }
 
 export async function getNotes(sessionId: string): Promise<NotesResponse> {
-  const response = await fetch(`${BASE_URL}/notes/${sessionId}`);
+  const response = await apiFetch(`${BASE_URL}/notes/${sessionId}`);
   return handleResponse(response);
 }
 
@@ -361,7 +376,7 @@ export async function generateNotes(sessionId: string): Promise<{
   task_id: string
   status: string
 }> {
-  const response = await fetch(`${BASE_URL}/notes/generate/${sessionId}`, {
+  const response = await apiFetch(`${BASE_URL}/notes/generate/${sessionId}`, {
     method: 'POST',
   })
 
@@ -369,7 +384,7 @@ export async function generateNotes(sessionId: string): Promise<{
 }
 
 export async function getSessions(): Promise<{sessions: Session[]}> {
-  const response = await fetch(`${BASE_URL}/sessions`);
+  const response = await apiFetch(`${BASE_URL}/sessions`);
   return handleResponse(response);
 }
 
@@ -381,6 +396,7 @@ export interface LearnerAnalytics {
   weak_concepts: number
   due_reviews: number
   active_misconceptions: number
+  resolved_misconceptions: number
 
   concepts: Array<{
     concept: string
@@ -422,8 +438,16 @@ export interface LearnerAnalytics {
 export async function getLearnerAnalytics(
   sessionId: string
 ): Promise<LearnerAnalytics> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${BASE_URL}/learner/analytics/${sessionId}`
+  )
+
+  return handleResponse(response)
+}
+
+export async function getCumulativeLearnerAnalytics(): Promise<LearnerAnalytics> {
+  const response = await apiFetch(
+    `${BASE_URL}/learner/analytics/me`
   )
 
   return handleResponse(response)
@@ -463,7 +487,7 @@ export interface NextLearningAction {
 export async function getNextLearningAction(
   sessionId: string
 ): Promise<NextLearningAction> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${BASE_URL}/learner/next-action/${sessionId}`
   )
 
@@ -471,20 +495,20 @@ export async function getNextLearningAction(
 }
 
 export async function deleteSession(sessionId: string): Promise<{deleted: boolean}> {
-  const response = await fetch(`${BASE_URL}/sessions/${sessionId}`, {
+  const response = await apiFetch(`${BASE_URL}/sessions/${sessionId}`, {
     method: 'DELETE',
   });
   return handleResponse(response);
 }
 
 export async function getFact(sessionId: string): Promise<{ fact: string }> {
-  const res = await fetch(`${BASE_URL}/fact/${sessionId}`)
+  const res = await apiFetch(`${BASE_URL}/fact/${sessionId}`)
   if (!res.ok) throw new Error('Failed to fetch fact')
   return res.json()
 }
 
 export async function getProgress(sessionId: string): Promise<{ quiz_avg: number, mastery_pct: number }> {
-  const response = await fetch(`${BASE_URL}/progress/${sessionId}`);
+  const response = await apiFetch(`${BASE_URL}/progress/${sessionId}`);
   return handleResponse(response);
 }
 
@@ -503,7 +527,7 @@ export async function getVideoRecommendation(
   learning_path: any
   video: VideoRecommendation
 }> {
-  const response = await fetch(
+  const response = await apiFetch(
     `${BASE_URL}/learner/video-recommendation/${sessionId}`
   )
 
