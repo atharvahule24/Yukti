@@ -5,7 +5,13 @@ from agents.rag_workflow import RagWorkflow
 from db import get_history
 
 chat_bp = Blueprint('chat', __name__)
-rag_workflow = RagWorkflow()
+_rag_workflow = None
+
+def get_rag_workflow():
+    global _rag_workflow
+    if _rag_workflow is None:
+        _rag_workflow = RagWorkflow()
+    return _rag_workflow
 
 @chat_bp.route('/chat/history/<session_id>', methods=['GET'])
 @require_session_owner
@@ -40,7 +46,7 @@ def chat():
 
     def generate():
         try:
-            for event in rag_workflow.run(message, session_id, mode):
+            for event in get_rag_workflow().run(message, session_id, mode):
                 if isinstance(event, dict) and event.get("type") == "citations":
                     yield f'event: citations\ndata: {json.dumps(event.get("data", []))}\n\n'
                 else:
