@@ -19,8 +19,8 @@ RUN mkdir -p /data/uploads /data/vector_store
 RUN chmod -R 777 /data
 
 # Default port for Gunicorn
-ENV PORT=5000
-EXPOSE $PORT
+ENV PORT=10000
+EXPOSE 10000
 
 # Start supervisor
 CMD ["supervisord", "-c", "/app/supervisord.conf"]
