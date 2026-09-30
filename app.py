@@ -29,7 +29,7 @@ app = Flask(__name__)
 init_db()
 allowed_origins = os.getenv(
     "ALLOWED_ORIGINS",
-    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174",
+    "https://yukti-frontend-b4s9.onrender.com,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174",
 ).split(",")
 CORS(app, origins=[origin.strip() for origin in allowed_origins if origin.strip()])
 
