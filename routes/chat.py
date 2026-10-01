@@ -1,7 +1,6 @@
 from utils.auth import require_session_owner
 import json
 from flask import Blueprint, request, Response, stream_with_context, jsonify
-from agents.rag_workflow import RagWorkflow
 from db import get_history
 
 chat_bp = Blueprint('chat', __name__)
@@ -10,6 +9,7 @@ _rag_workflow = None
 def get_rag_workflow():
     global _rag_workflow
     if _rag_workflow is None:
+        from agents.rag_workflow import RagWorkflow
         _rag_workflow = RagWorkflow()
     return _rag_workflow
 

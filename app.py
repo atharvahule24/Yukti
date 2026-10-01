@@ -4,11 +4,6 @@ load_dotenv()  # must be first — before any module that reads env vars
 
 from flask import Flask, render_template, request, Response, stream_with_context, jsonify
 from werkzeug.utils import secure_filename  # ADDED: Import secure_filename
-from loaders.loader_manager import LoaderManager
-from loaders.youtube_loader import YoutubeLoader
-from processing.chunker import Chunker
-from processing.embedder import Embedder
-from retrieval.vector_store import VectorStore
 
 from db import init_db
 from flask_cors import CORS
@@ -93,6 +88,11 @@ def index():
             filepath = os.path.join(app.config["UPLOAD_FOLDER"], filename)
             file.save(filepath)
 
+            from loaders.loader_manager import LoaderManager
+            from processing.chunker import Chunker
+            from processing.embedder import Embedder
+            from retrieval.vector_store import VectorStore
+
             loader = LoaderManager()
             documents = loader.load(filepath)
 
@@ -146,6 +146,11 @@ def youtube():
         url = request.form["url"]
 
         try:
+            from loaders.youtube_loader import YoutubeLoader
+            from processing.chunker import Chunker
+            from processing.embedder import Embedder
+            from retrieval.vector_store import VectorStore
+
             loader = YoutubeLoader(url)
             documents = loader.load()
 
