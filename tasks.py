@@ -70,6 +70,7 @@ def process_upload(self, session_id, filepath, title, original_filename, is_yout
             log_memory("before loader.load(filepath)")
             print("DIAG: before loader.load", flush=True)
             documents = loader.load(filepath)
+            print(f"DIAG: documents loaded = {len(documents)}", flush=True)
             print("DIAG: after loader.load", flush=True)
             log_memory("after loader.load(filepath)")
 
