@@ -112,7 +112,6 @@ def process_upload(self, session_id, filepath, title, original_filename, is_yout
         return {"status": "ready", "session_id": session_id, "chunk_count": len(chunks)}
 
     except Exception as e:
-        self.update_state(state="FAILURE", meta={"error": str(e)})
         raise
 
 
@@ -143,7 +142,6 @@ def generate_graph_task(self, session_id):
         return graph_data
 
     except Exception as e:
-        self.update_state(state="FAILURE", meta={"error": str(e)})
         raise
 
 
@@ -173,7 +171,6 @@ def generate_notes_task(self, session_id):
         return notes or {"points": []}
 
     except Exception as e:
-        self.update_state(state="FAILURE", meta={"error": str(e)})
         raise
 
 
@@ -211,5 +208,4 @@ def generate_flashcards_task(self, session_id):
         return flashcards or {"cards": []}
 
     except Exception as e:
-        self.update_state(state="FAILURE", meta={"error": str(e)})
         raise
