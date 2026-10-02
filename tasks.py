@@ -24,13 +24,25 @@ def process_upload(self, session_id, filepath, title, original_filename, is_yout
             print(f"DIAG: spec loaders.loader_manager = {importlib.util.find_spec('loaders.loader_manager')}", flush=True)
         except Exception as e:
             print(f"DIAG: spec loaders.loader_manager Exception = {e}", flush=True)
-        print("DIAG: before processing imports", flush=True)
+        print("DIAG: before import loaders.loader_manager", flush=True)
         from loaders.loader_manager import LoaderManager
+        print("DIAG: after import loaders.loader_manager", flush=True)
+
+        print("DIAG: before import loaders.youtube_loader", flush=True)
         from loaders.youtube_loader import YoutubeLoader
+        print("DIAG: after import loaders.youtube_loader", flush=True)
+
+        print("DIAG: before import processing.chunker", flush=True)
         from processing.chunker import Chunker
+        print("DIAG: after import processing.chunker", flush=True)
+
+        print("DIAG: before import processing.embedder", flush=True)
         from processing.embedder import Embedder
+        print("DIAG: after import processing.embedder", flush=True)
+
+        print("DIAG: before import retrieval.vector_store", flush=True)
         from retrieval.vector_store import VectorStore
-        print("DIAG: after processing imports", flush=True)
+        print("DIAG: after import retrieval.vector_store", flush=True)
 
         if is_youtube:
             loader = YoutubeLoader(youtube_url)
