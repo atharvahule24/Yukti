@@ -1,10 +1,9 @@
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
 
 class Embedder:
-    def __init__(self, model_name="all-MiniLM-L6-v2"):
-        self.model = HuggingFaceEmbeddings(model_name=model_name)
-
-    def embed_documents(self, texts):
-        # We might not need this explicitly since FAISS uses the model object directly, 
-        # but kept for backward compatibility if needed:
-        return self.model.embed_documents(texts)
+    def __init__(self, model_name="sentence-transformers/all-MiniLM-L6-v2"):
+        self.model = FastEmbedEmbeddings(
+            model_name=model_name,
+            batch_size=16,
+            threads=1
+        )

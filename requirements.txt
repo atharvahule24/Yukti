@@ -3,7 +3,7 @@ python-dotenv
 langchain
 langchain-community
 langchain-core
-langchain-huggingface
+fastembed==0.3.6
 langchain-groq
 langgraph
 faiss-cpu
@@ -15,7 +15,6 @@ python-docx
 pypdf
 python-pptx
 unstructured
-sentence-transformers
 celery[redis]
 redis
 
