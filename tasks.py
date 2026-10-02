@@ -7,6 +7,16 @@ from routes.store import session_store
 @celery.task(bind=True)
 def process_upload(self, session_id, filepath, title, original_filename, is_youtube=False, youtube_url=None):
     try:
+
+        def log_memory(label):
+            try:
+                import resource
+                rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+                print(f"MEMORY: {label}: {rss_mb:.1f} MB", flush=True)
+            except Exception:
+                pass
+
+        log_memory("task start")
         import sys
         import os
         import importlib.util
@@ -32,17 +42,23 @@ def process_upload(self, session_id, filepath, title, original_filename, is_yout
         from loaders.youtube_loader import YoutubeLoader
         print("DIAG: after import loaders.youtube_loader", flush=True)
 
+        log_memory("before from processing.chunker import Chunker")
         print("DIAG: before import processing.chunker", flush=True)
         from processing.chunker import Chunker
         print("DIAG: after import processing.chunker", flush=True)
+        log_memory("after from processing.chunker import Chunker")
 
+        log_memory("before from processing.embedder import Embedder")
         print("DIAG: before import processing.embedder", flush=True)
         from processing.embedder import Embedder
         print("DIAG: after import processing.embedder", flush=True)
+        log_memory("after from processing.embedder import Embedder")
 
+        log_memory("before from retrieval.vector_store import VectorStore")
         print("DIAG: before import retrieval.vector_store", flush=True)
         from retrieval.vector_store import VectorStore
         print("DIAG: after import retrieval.vector_store", flush=True)
+        log_memory("after from retrieval.vector_store import VectorStore")
 
         if is_youtube:
             loader = YoutubeLoader(youtube_url)
@@ -51,13 +67,16 @@ def process_upload(self, session_id, filepath, title, original_filename, is_yout
             print("DIAG: before LoaderManager", flush=True)
             loader = LoaderManager()
             print("DIAG: after LoaderManager", flush=True)
+            log_memory("before loader.load(filepath)")
             print("DIAG: before loader.load", flush=True)
             documents = loader.load(filepath)
             print("DIAG: after loader.load", flush=True)
+            log_memory("after loader.load(filepath)")
 
         chunker = Chunker()
         chunks = chunker.split(documents)
         print("DIAG: after chunking", flush=True)
+        log_memory("after chunker.split(documents)")
 
         for chunk in chunks:
             chunk.metadata["session_id"] = session_id
@@ -65,9 +84,11 @@ def process_upload(self, session_id, filepath, title, original_filename, is_yout
         print("DIAG: before Embedder", flush=True)
         embedder = Embedder()
         print("DIAG: after Embedder", flush=True)
+        log_memory("after Embedder()")
         vector_store = VectorStore()
         vector_store.add(embedder.model, chunks)
         vector_store.save()
+        log_memory("after vector_store.add(...)")
         print("DIAG: after vector store", flush=True)
 
         full_text = "\n\n".join(doc.page_content for doc in chunks)
