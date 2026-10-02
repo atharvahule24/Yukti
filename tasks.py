@@ -84,13 +84,15 @@ def process_upload(self, session_id, filepath, title, original_filename, is_yout
 
         print("DIAG: before Embedder", flush=True)
         embedder = Embedder()
+        log_memory("after Embedder")
         print("DIAG: after Embedder", flush=True)
-        log_memory("after Embedder()")
         vector_store = VectorStore()
+        log_memory("before vector_store.add")
+        print("DIAG: before vector_store.add", flush=True)
         vector_store.add(embedder.model, chunks)
+        log_memory("after vector_store.add")
+        print("DIAG: after vector_store.add", flush=True)
         vector_store.save()
-        log_memory("after vector_store.add(...)")
-        print("DIAG: after vector store", flush=True)
 
         full_text = "\n\n".join(doc.page_content for doc in chunks)
 
