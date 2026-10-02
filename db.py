@@ -13,8 +13,9 @@ DB_PATH = os.path.join(DATA_DIR, "Yukti.db")
 
 @contextmanager
 def get_conn():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL;")
     try:
         yield conn
         conn.commit()
