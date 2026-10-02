@@ -7,6 +7,23 @@ from routes.store import session_store
 @celery.task(bind=True)
 def process_upload(self, session_id, filepath, title, original_filename, is_youtube=False, youtube_url=None):
     try:
+        import sys
+        import os
+        import importlib.util
+        print(f"DIAG: cwd = {os.getcwd()}", flush=True)
+        print(f"DIAG: sys.path = {sys.path}", flush=True)
+        print(f"DIAG: /app exists = {os.path.exists('/app')}", flush=True)
+        print(f"DIAG: /app/loaders exists = {os.path.exists('/app/loaders')}", flush=True)
+        if os.path.exists('/app/loaders'):
+            print(f"DIAG: /app/loaders files = {os.listdir('/app/loaders')}", flush=True)
+        try:
+            print(f"DIAG: spec loaders = {importlib.util.find_spec('loaders')}", flush=True)
+        except Exception as e:
+            print(f"DIAG: spec loaders Exception = {e}", flush=True)
+        try:
+            print(f"DIAG: spec loaders.loader_manager = {importlib.util.find_spec('loaders.loader_manager')}", flush=True)
+        except Exception as e:
+            print(f"DIAG: spec loaders.loader_manager Exception = {e}", flush=True)
         from loaders.loader_manager import LoaderManager
         from loaders.youtube_loader import YoutubeLoader
         from processing.chunker import Chunker
