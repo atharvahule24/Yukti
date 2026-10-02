@@ -11,7 +11,33 @@ def process_upload(self, session_id, filepath, title, original_filename, is_yout
         def log_memory(label):
             try:
                 import resource
+                import os
+                import redis
+                import json
+                from datetime import datetime
                 rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+                
+                target_labels = {
+                    "before Embedder",
+                    "after Embedder",
+                    "before vector_store.add",
+                    "after vector_store.add"
+                }
+                
+                if label in target_labels:
+                    redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+                    r = redis.Redis.from_url(
+                        redis_url,
+                        socket_connect_timeout=2,
+                        socket_timeout=2
+                    )
+                    msg = json.dumps({
+                        "timestamp": datetime.now().isoformat(),
+                        "label": label,
+                        "memory_mb": round(rss_mb, 1)
+                    })
+                    r.rpush(f"diag_logs_{session_id}", msg)
+
                 print(f"MEMORY: {label}: {rss_mb:.1f} MB", flush=True)
             except Exception:
                 pass
@@ -82,6 +108,7 @@ def process_upload(self, session_id, filepath, title, original_filename, is_yout
         for chunk in chunks:
             chunk.metadata["session_id"] = session_id
 
+        log_memory("before Embedder")
         print("DIAG: before Embedder", flush=True)
         embedder = Embedder()
         log_memory("after Embedder")
