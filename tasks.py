@@ -24,29 +24,39 @@ def process_upload(self, session_id, filepath, title, original_filename, is_yout
             print(f"DIAG: spec loaders.loader_manager = {importlib.util.find_spec('loaders.loader_manager')}", flush=True)
         except Exception as e:
             print(f"DIAG: spec loaders.loader_manager Exception = {e}", flush=True)
+        print("DIAG: before processing imports", flush=True)
         from loaders.loader_manager import LoaderManager
         from loaders.youtube_loader import YoutubeLoader
         from processing.chunker import Chunker
         from processing.embedder import Embedder
         from retrieval.vector_store import VectorStore
+        print("DIAG: after processing imports", flush=True)
 
         if is_youtube:
             loader = YoutubeLoader(youtube_url)
-            documents = loader.load()  # no args — URL already passed to __init__
+            documents = loader.load()  # no args ?" URL already passed to __init__
         else:
+            print("DIAG: before LoaderManager", flush=True)
             loader = LoaderManager()
+            print("DIAG: after LoaderManager", flush=True)
+            print("DIAG: before loader.load", flush=True)
             documents = loader.load(filepath)
+            print("DIAG: after loader.load", flush=True)
 
         chunker = Chunker()
         chunks = chunker.split(documents)
+        print("DIAG: after chunking", flush=True)
 
         for chunk in chunks:
             chunk.metadata["session_id"] = session_id
 
+        print("DIAG: before Embedder", flush=True)
         embedder = Embedder()
+        print("DIAG: after Embedder", flush=True)
         vector_store = VectorStore()
         vector_store.add(embedder.model, chunks)
         vector_store.save()
+        print("DIAG: after vector store", flush=True)
 
         full_text = "\n\n".join(doc.page_content for doc in chunks)
 
