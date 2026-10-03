@@ -1,7 +1,7 @@
 FROM python:3.11-slim
 
 # Install supervisor and required system dependencies
-RUN apt-get update && apt-get install -y supervisor sqlite3 libgl1 && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y supervisor sqlite3 libgl1 media-types && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
