@@ -16,9 +16,15 @@ class ProcessUploadTask(Task):
                 loader = YoutubeLoader()
                 documents = loader.load(filepath)
             else:
+                import os
+                import socket
+                print(f"CELERY DEBUG hostname={socket.gethostname()}")
+                print(f"CELERY DEBUG filepath={filepath}")
+                print(f"CELERY DEBUG exists_before_load={os.path.exists(filepath)}")
+                print(f"CELERY DEBUG size_before_load={os.path.getsize(filepath) if os.path.exists(filepath) else 'MISSING'}")
+                print(f"CELERY DEBUG uploads_dir={os.listdir('/data/uploads') if os.path.exists('/data/uploads') else 'DIRECTORY_MISSING'}")
                 loader = LoaderManager()
                 documents = loader.load(filepath)
-                
             self.update_state(state="PROGRESS", meta={"stage": "Chunking text..."})
             chunker = Chunker()
             chunks = chunker.split(documents)

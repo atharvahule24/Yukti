@@ -48,8 +48,13 @@ def upload():
             original_filename = file.filename
             filepath = os.path.join(UPLOADS_DIR, filename)
             file.save(filepath)
+            import os
+            import socket
+            print(f"UPLOAD DEBUG hostname={socket.gethostname()}")
+            print(f"UPLOAD DEBUG filepath={filepath}")
+            print(f"UPLOAD DEBUG exists_after_save={os.path.exists(filepath)}")
+            print(f"UPLOAD DEBUG size_after_save={os.path.getsize(filepath) if os.path.exists(filepath) else 'MISSING'}")
             title = filename
-            
             save_session_data(session_id, {
                 "id": session_id,
                 "title": title,
