@@ -1,3 +1,4 @@
+import os
 import celery_app
 from celery import Task
 from processing.chunker import Chunker
