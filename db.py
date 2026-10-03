@@ -59,7 +59,8 @@ def save_session_data(session_id: str, data: dict[str, Any], user_id: int | None
     supabase.table("sessions").upsert(row).execute()
 
 def get_session_data(session_id: str) -> dict[str, Any] | None:
-    res = supabase.table("sessions").select("*").eq("session_id", session_id).maybe_single().execute()
+    res = supabase.table("sessions").select("*").eq("session_id", session_id).limit(1).execute()
+    res.data = res.data[0] if res.data else None
     if not res.data:
         return None
     row = res.data
@@ -102,7 +103,8 @@ def get_history(session_id: str, limit: int = 6) -> list[dict[str, str]]:
 
 def record_quiz_score(session_id: str, score: int | float):
     now = datetime.utcnow().isoformat()
-    res = supabase.table("progress").select("*").eq("session_id", session_id).maybe_single().execute()
+    res = supabase.table("progress").select("*").eq("session_id", session_id).limit(1).execute()
+    res.data = res.data[0] if res.data else None
     if res.data:
         new_attempts = res.data.get("quiz_attempts", 0) + 1
         new_score = res.data.get("quiz_score_total", 0) + score
@@ -129,7 +131,8 @@ def update_learner_state(
     now = datetime.utcnow()
     
     for concept in correct_concepts:
-        res = supabase.table("learner_state").select("*").eq("session_id", session_id).eq("concept", concept).maybe_single().execute()
+        res = supabase.table("learner_state").select("*").eq("session_id", session_id).eq("concept", concept).limit(1).execute()
+        res.data = res.data[0] if res.data else None
         row = res.data
         if row:
             attempts = row.get("attempts", 0) + 1
@@ -173,7 +176,8 @@ def update_learner_state(
             }).execute()
 
     for concept in missed_concepts:
-        res = supabase.table("learner_state").select("*").eq("session_id", session_id).eq("concept", concept).maybe_single().execute()
+        res = supabase.table("learner_state").select("*").eq("session_id", session_id).eq("concept", concept).limit(1).execute()
+        res.data = res.data[0] if res.data else None
         row = res.data
         
         review_interval = 1.0
@@ -317,7 +321,8 @@ def get_latest_metacognitive_checkin(
 
 def upsert_flashcard_progress(session_id: str, total: int, mastered: int):
     now = datetime.utcnow().isoformat()
-    res = supabase.table("progress").select("*").eq("session_id", session_id).maybe_single().execute()
+    res = supabase.table("progress").select("*").eq("session_id", session_id).limit(1).execute()
+    res.data = res.data[0] if res.data else None
     if res.data:
         supabase.table("progress").update({
             "flashcards_total": total,
@@ -333,7 +338,8 @@ def upsert_flashcard_progress(session_id: str, total: int, mastered: int):
         }).execute()
 
 def get_progress(session_id: str) -> dict[str, float | int]:
-    res = supabase.table("progress").select("*").eq("session_id", session_id).maybe_single().execute()
+    res = supabase.table("progress").select("*").eq("session_id", session_id).limit(1).execute()
+    res.data = res.data[0] if res.data else None
     row = res.data
     if not row:
         return {"quiz_avg": 0, "mastery_pct": 0}
@@ -342,7 +348,8 @@ def get_progress(session_id: str) -> dict[str, float | int]:
     return {"quiz_avg": round(quiz_avg, 1), "mastery_pct": round(mastery_pct)}
 
 def upsert_card_schedule(session_id: str, card_id: str, front: str, next_review: str):
-    res = supabase.table("card_schedule").select("id").eq("id", card_id).maybe_single().execute()
+    res = supabase.table("card_schedule").select("id").eq("id", card_id).limit(1).execute()
+    res.data = res.data[0] if res.data else None
     if not res.data:
         supabase.table("card_schedule").insert({
             "id": card_id,
@@ -352,7 +359,8 @@ def upsert_card_schedule(session_id: str, card_id: str, front: str, next_review:
         }).execute()
 
 def get_card_schedule(card_id: str):
-    res = supabase.table("card_schedule").select("*").eq("id", card_id).maybe_single().execute()
+    res = supabase.table("card_schedule").select("*").eq("id", card_id).limit(1).execute()
+    res.data = res.data[0] if res.data else None
     return res.data
 
 def update_card_schedule(card_id: str, easiness: float, interval: int, repetitions: int, next_review: str):
@@ -502,11 +510,13 @@ def save_user(username: str, password_hash: str) -> int:
     return res.data[0]["id"]
 
 def get_user_by_username(username: str) -> dict | None:
-    res = supabase.table("users").select("*").eq("username", username).maybe_single().execute()
+    res = supabase.table("users").select("*").eq("username", username).limit(1).execute()
+    res.data = res.data[0] if res.data else None
     return res.data
 
 def get_user_by_id(user_id: int) -> dict | None:
-    res = supabase.table("users").select("*").eq("id", user_id).maybe_single().execute()
+    res = supabase.table("users").select("*").eq("id", user_id).limit(1).execute()
+    res.data = res.data[0] if res.data else None
     return res.data
 
 def create_auth_token(user_id: int, token: str):
@@ -518,7 +528,8 @@ def create_auth_token(user_id: int, token: str):
     }).execute()
 
 def get_user_id_by_token(token: str) -> int | None:
-    res = supabase.table("auth_tokens").select("user_id").eq("token", token).maybe_single().execute()
+    res = supabase.table("auth_tokens").select("user_id").eq("token", token).limit(1).execute()
+    res.data = res.data[0] if res.data else None
     return res.data["user_id"] if res.data else None
 
 def delete_auth_token(token: str):
@@ -546,7 +557,8 @@ def save_learner_profile(
     }).execute()
 
 def get_learner_profile(session_id: str) -> dict | None:
-    res = supabase.table("learner_profiles").select("*").eq("session_id", session_id).maybe_single().execute()
+    res = supabase.table("learner_profiles").select("*").eq("session_id", session_id).limit(1).execute()
+    res.data = res.data[0] if res.data else None
     row = res.data
     if not row:
         return None
