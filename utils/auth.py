@@ -47,6 +47,8 @@ def require_session_owner(f):
                 session_id = data.get('session_id')
             else:
                 session_id = request.form.get('session_id')
+        if not session_id:
+            session_id = request.args.get('session_id')
                 
         if session_id:
             valid, status_code = verify_session_owner(session_id, request.current_user_id)
