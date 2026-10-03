@@ -1,179 +1,28 @@
 import json
 import os
-import sqlite3
+import re
 from datetime import datetime, timedelta
 from typing import Any
-import re
 
-from contextlib import contextmanager
+from supabase import create_client, Client
 
-DATA_DIR = os.getenv("DATA_DIR", os.path.dirname(__file__))
-DB_PATH = os.path.join(DATA_DIR, "Yukti.db")
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in the environment.")
 
-@contextmanager
-def get_conn():
-    conn = sqlite3.connect(DB_PATH, timeout=30.0)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL;")
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
-
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 def init_db():
-    with get_conn() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                username TEXT UNIQUE NOT NULL,
-                password_hash TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS auth_tokens (
-                token TEXT PRIMARY KEY,
-                user_id INTEGER NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (user_id) REFERENCES users(id)
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS sessions (
-                session_id TEXT PRIMARY KEY,
-                filename TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                text TEXT NOT NULL,
-                data TEXT NOT NULL,
-                user_id INTEGER,
-                FOREIGN KEY (user_id) REFERENCES users(id)
-            )
-            """
-        )
-        try:
-            conn.execute("ALTER TABLE sessions ADD COLUMN user_id INTEGER REFERENCES users(id)")
-        except sqlite3.OperationalError:
-            pass
+    pass
 
-
-        conn.execute(
-    """
-    CREATE TABLE IF NOT EXISTS metacognitive_checkins (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL,
-        concept TEXT NOT NULL,
-        confidence_rating INTEGER NOT NULL,
-        reflection TEXT,
-        created_at TEXT NOT NULL,
-        FOREIGN KEY(session_id) REFERENCES sessions(session_id)
-    )
-    """
-)
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                role TEXT NOT NULL,
-                content TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS progress (
-                session_id TEXT PRIMARY KEY,
-                quiz_attempts INTEGER DEFAULT 0,
-                quiz_score_total INTEGER DEFAULT 0,
-                flashcards_total INTEGER DEFAULT 0,
-                flashcards_mastered INTEGER DEFAULT 0,
-                updated_at TEXT,
-                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
-            )
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS learner_state (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                concept TEXT NOT NULL,
-                mastery REAL DEFAULT 0.0,
-                confidence REAL DEFAULT 0.5,
-                attempts INTEGER DEFAULT 0,
-                correct_attempts INTEGER DEFAULT 0,
-                recent_score REAL DEFAULT 0.0,
-                needs_examples INTEGER DEFAULT 0,
-                needs_step_by_step INTEGER DEFAULT 0,
-                updated_at TEXT NOT NULL,
-                last_reviewed_at TEXT,
-                next_review_at TEXT,
-                review_interval_days REAL DEFAULT 1.0,
-                UNIQUE(session_id, concept),
-                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
-            )
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS card_schedule (
-                id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                front TEXT NOT NULL,
-                easiness REAL DEFAULT 2.5,
-                interval INTEGER DEFAULT 1,
-                repetitions INTEGER DEFAULT 0,
-                next_review TEXT,
-                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
-            )
-            """
-        )
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS learner_profiles (
-                session_id TEXT PRIMARY KEY,
-                learning_style TEXT DEFAULT 'adaptive',
-                preferred_difficulty TEXT DEFAULT 'medium',
-                strengths TEXT DEFAULT '[]',
-                weaknesses TEXT DEFAULT '[]',
-                updated_at TEXT,
-                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
-            )
-            """
-        )        
-
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS misconceptions (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                session_id TEXT NOT NULL,
-                concept TEXT NOT NULL,
-                misconception TEXT NOT NULL,
-                evidence TEXT,
-                severity TEXT NOT NULL DEFAULT 'medium',
-                suggested_intervention TEXT,
-                occurrences INTEGER NOT NULL DEFAULT 1,
-                resolved INTEGER NOT NULL DEFAULT 0,
-                first_detected TEXT NOT NULL,
-                last_detected TEXT NOT NULL,
-                FOREIGN KEY (session_id) REFERENCES sessions(session_id)
-            )
-            """
-        )
+def get_conn():
+    from contextlib import contextmanager
+    @contextmanager
+    def mock_conn():
+        yield None
+    return mock_conn()
 
 def _normalise_session(data: dict[str, Any]) -> dict[str, Any]:
     session_id = data.get("id") or data.get("session_id")
@@ -190,39 +39,30 @@ def _normalise_session(data: dict[str, Any]) -> dict[str, Any]:
     data["text"] = full_text
     return data
 
-
 def save_session_data(session_id: str, data: dict[str, Any], user_id: int | None = None):
     data = _normalise_session(dict(data))
-    with get_conn() as conn:
-        # Get existing user_id if any, so we don't overwrite it with NULL on replace
-        existing = conn.execute("SELECT user_id FROM sessions WHERE session_id=?", (session_id,)).fetchone()
-        final_user_id = user_id
-        if existing and existing["user_id"] is not None:
-            final_user_id = existing["user_id"]
-            
-        conn.execute(
-            """
-            INSERT OR REPLACE INTO sessions (session_id, filename, created_at, text, data, user_id)
-            VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            (
-                session_id,
-                data["filename"],
-                data["created_at"],
-                data["full_text"],
-                json.dumps(data),
-                final_user_id
-            ),
-        )
+    
+    # Get existing user_id if any, so we don't overwrite it with NULL on replace
+    res = supabase.table("sessions").select("user_id").eq("session_id", session_id).execute()
+    existing_user_id = res.data[0]["user_id"] if res.data and res.data[0].get("user_id") is not None else None
+    
+    final_user_id = user_id if user_id is not None else existing_user_id
+    
+    row = {
+        "session_id": session_id,
+        "filename": data["filename"],
+        "created_at": data["created_at"],
+        "text": data["full_text"],
+        "data": json.dumps(data),
+        "user_id": final_user_id
+    }
+    supabase.table("sessions").upsert(row).execute()
 
 def get_session_data(session_id: str) -> dict[str, Any] | None:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM sessions WHERE session_id=?",
-            (session_id,),
-        ).fetchone()
-    if not row:
+    res = supabase.table("sessions").select("*").eq("session_id", session_id).maybe_single().execute()
+    if not res.data:
         return None
+    row = res.data
     try:
         data = json.loads(row["data"])
     except Exception:
@@ -237,66 +77,47 @@ def get_session_data(session_id: str) -> dict[str, Any] | None:
     data.setdefault("text", row["text"])
     return data
 
-
 def list_session_data(user_id: int | None = None) -> list[dict[str, Any]]:
-    with get_conn() as conn:
-        if user_id is not None:
-            rows = conn.execute(
-                "SELECT session_id FROM sessions WHERE user_id=? ORDER BY created_at DESC", (user_id,)
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                "SELECT session_id FROM sessions ORDER BY created_at DESC"
-            ).fetchall()
-    return [data for row in rows if (data := get_session_data(row["session_id"]))]
-
+    query = supabase.table("sessions").select("session_id").order("created_at", desc=True)
+    if user_id is not None:
+        query = query.eq("user_id", user_id)
+    res = query.execute()
+    return [data for row in res.data if (data := get_session_data(row["session_id"]))]
 
 def delete_session_data(session_id: str):
-    with get_conn() as conn:
-        conn.execute("DELETE FROM messages WHERE session_id=?", (session_id,))
-        conn.execute("DELETE FROM progress WHERE session_id=?", (session_id,))
-        conn.execute("DELETE FROM card_schedule WHERE session_id=?", (session_id,))
-        conn.execute("DELETE FROM sessions WHERE session_id=?", (session_id,))
-        conn.execute("DELETE FROM misconceptions WHERE session_id=?",(session_id,),
-)        
-
+    # PostgreSQL ON DELETE CASCADE handles related tables (messages, progress, etc.)
+    supabase.table("sessions").delete().eq("session_id", session_id).execute()
 
 def save_message(session_id: str, role: str, content: str, created_at: str):
-    with get_conn() as conn:
-        conn.execute(
-            "INSERT INTO messages (session_id, role, content, created_at) VALUES (?, ?, ?, ?)",
-            (session_id, role, content, created_at),
-        )
-
+    supabase.table("messages").insert({
+        "session_id": session_id,
+        "role": role,
+        "content": content,
+        "created_at": created_at
+    }).execute()
 
 def get_history(session_id: str, limit: int = 6) -> list[dict[str, str]]:
-    with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT role, content FROM messages
-            WHERE session_id=?
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (session_id, limit),
-        ).fetchall()
-    return list(reversed([dict(row) for row in rows]))
-
+    res = supabase.table("messages").select("role, content").eq("session_id", session_id).order("id", desc=True).limit(limit).execute()
+    return list(reversed(res.data))
 
 def record_quiz_score(session_id: str, score: int | float):
     now = datetime.utcnow().isoformat()
-    with get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO progress (session_id, quiz_attempts, quiz_score_total, updated_at)
-            VALUES (?, 1, ?, ?)
-            ON CONFLICT(session_id) DO UPDATE SET
-                quiz_attempts = quiz_attempts + 1,
-                quiz_score_total = quiz_score_total + excluded.quiz_score_total,
-                updated_at = excluded.updated_at
-            """,
-            (session_id, score, now),
-        )
+    res = supabase.table("progress").select("*").eq("session_id", session_id).maybe_single().execute()
+    if res.data:
+        new_attempts = res.data.get("quiz_attempts", 0) + 1
+        new_score = res.data.get("quiz_score_total", 0) + score
+        supabase.table("progress").update({
+            "quiz_attempts": new_attempts,
+            "quiz_score_total": new_score,
+            "updated_at": now
+        }).eq("session_id", session_id).execute()
+    else:
+        supabase.table("progress").insert({
+            "session_id": session_id,
+            "quiz_attempts": 1,
+            "quiz_score_total": score,
+            "updated_at": now
+        }).execute()
 
 def update_learner_state(
     session_id: str,
@@ -306,302 +127,109 @@ def update_learner_state(
     misconception_severity: str | None = None,
 ):
     now = datetime.utcnow()
-
-    with get_conn() as conn:
-
-        # =========================================================
-        # CORRECT CONCEPTS
-        # =========================================================
-        for concept in correct_concepts:
-
-            row = conn.execute(
-                """
-                SELECT
-                    mastery,
-                    confidence,
-                    attempts,
-                    correct_attempts,
-                    review_interval_days
-                FROM learner_state
-                WHERE session_id=? AND concept=?
-                """,
-                (session_id, concept),
-            ).fetchone()
-
-            if row:
-                attempts = row["attempts"] + 1
-                correct_attempts = row["correct_attempts"] + 1
-
-                mastery = (
-                    correct_attempts / attempts * 100
-                    if attempts > 0
-                    else 0.0
-                )
-
-                confidence = min(
-                    1.0,
-                    row["confidence"] + 0.1
-                )
-
-                # Increase revision interval after successful recall.
-                previous_interval = row["review_interval_days"] or 1.0
-
-                review_interval = min(
-                    30.0,
-                    max(1.0, previous_interval * 2)
-                )
-
-                next_review = now + timedelta(
-                    days=review_interval
-                )
-
-                conn.execute(
-                    """
-                    UPDATE learner_state
-                    SET mastery=?,
-                        confidence=?,
-                        attempts=?,
-                        correct_attempts=?,
-                        recent_score=?,
-                        needs_examples=0,
-                        needs_step_by_step=0,
-                        last_reviewed_at=?,
-                        next_review_at=?,
-                        review_interval_days=?,
-                        updated_at=?
-                    WHERE session_id=? AND concept=?
-                    """,
-                    (
-                        mastery,
-                        confidence,
-                        attempts,
-                        correct_attempts,
-                        score,
-                        now.isoformat(),
-                        next_review.isoformat(),
-                        review_interval,
-                        now.isoformat(),
-                        session_id,
-                        concept,
-                    ),
-                )
-
-            else:
-                # First successful demonstration.
-                review_interval = 1.0
-
-                next_review = now + timedelta(
-                    days=review_interval
-                )
-
-                conn.execute(
-                    """
-                    INSERT INTO learner_state (
-                        session_id,
-                        concept,
-                        mastery,
-                        confidence,
-                        attempts,
-                        correct_attempts,
-                        recent_score,
-                        needs_examples,
-                        needs_step_by_step,
-                        updated_at,
-                        last_reviewed_at,
-                        next_review_at,
-                        review_interval_days
-                    )
-                    VALUES (
-                        ?,
-                        ?,
-                        100.0,
-                        0.6,
-                        1,
-                        1,
-                        ?,
-                        0,
-                        0,
-                        ?,
-                        ?,
-                        ?,
-                        ?
-                    )
-                    """,
-                    (
-                        session_id,
-                        concept,
-                        score,
-                        now.isoformat(),
-                        now.isoformat(),
-                        next_review.isoformat(),
-                        review_interval,
-                    ),
-                )
-
-        # =========================================================
-        # MISSED CONCEPTS
-        # =========================================================
-        for concept in missed_concepts:
-
-            row = conn.execute(
-                """
-                SELECT
-                    mastery,
-                    confidence,
-                    attempts,
-                    correct_attempts
-                FROM learner_state
-                WHERE session_id=? AND concept=?
-                """,
-                (session_id, concept),
-            ).fetchone()
-
-            # A missed concept should be reviewed soon.
+    
+    for concept in correct_concepts:
+        res = supabase.table("learner_state").select("*").eq("session_id", session_id).eq("concept", concept).maybe_single().execute()
+        row = res.data
+        if row:
+            attempts = row.get("attempts", 0) + 1
+            correct_attempts = row.get("correct_attempts", 0) + 1
+            mastery = (correct_attempts / attempts * 100) if attempts > 0 else 0.0
+            confidence = min(1.0, row.get("confidence", 0.5) + 0.1)
+            previous_interval = row.get("review_interval_days") or 1.0
+            review_interval = min(30.0, max(1.0, previous_interval * 2))
+            next_review = now + timedelta(days=review_interval)
+            
+            supabase.table("learner_state").update({
+                "mastery": mastery,
+                "confidence": confidence,
+                "attempts": attempts,
+                "correct_attempts": correct_attempts,
+                "recent_score": score,
+                "needs_examples": 0,
+                "needs_step_by_step": 0,
+                "last_reviewed_at": now.isoformat(),
+                "next_review_at": next_review.isoformat(),
+                "review_interval_days": review_interval,
+                "updated_at": now.isoformat()
+            }).eq("session_id", session_id).eq("concept", concept).execute()
+        else:
             review_interval = 1.0
-            next_review = now + timedelta(
-                days=review_interval
-            )
+            next_review = now + timedelta(days=review_interval)
+            supabase.table("learner_state").insert({
+                "session_id": session_id,
+                "concept": concept,
+                "mastery": 100.0,
+                "confidence": 0.6,
+                "attempts": 1,
+                "correct_attempts": 1,
+                "recent_score": score,
+                "needs_examples": 0,
+                "needs_step_by_step": 0,
+                "updated_at": now.isoformat(),
+                "last_reviewed_at": now.isoformat(),
+                "next_review_at": next_review.isoformat(),
+                "review_interval_days": review_interval
+            }).execute()
 
-            confidence_drop = {
-                "low": 0.05,
-                "medium": 0.10,
-                "high": 0.15,
-            }.get(
-                misconception_severity,
-                0.10
-            )
-
-            if row:
-
-                attempts = row["attempts"] + 1
-                correct_attempts = row["correct_attempts"]
-
-                mastery = (
-                    correct_attempts / attempts * 100
-                    if attempts > 0
-                    else 0.0
-                )
-
-                confidence = max(
-                    0.0,
-                    row["confidence"] - confidence_drop
-                )
-
-                conn.execute(
-                    """
-                    UPDATE learner_state
-                    SET mastery=?,
-                        confidence=?,
-                        attempts=?,
-                        recent_score=?,
-                        needs_examples=1,
-                        needs_step_by_step=1,
-                        last_reviewed_at=?,
-                        next_review_at=?,
-                        review_interval_days=?,
-                        updated_at=?
-                    WHERE session_id=? AND concept=?
-                    """,
-                    (
-                        mastery,
-                        confidence,
-                        attempts,
-                        score,
-                        now.isoformat(),
-                        next_review.isoformat(),
-                        review_interval,
-                        now.isoformat(),
-                        session_id,
-                        concept,
-                    ),
-                )
-
-            else:
-
-                initial_confidence = {
-                    "low": 0.45,
-                    "medium": 0.40,
-                    "high": 0.35,
-                }.get(
-                    misconception_severity,
-                    0.40
-                )
-
-                conn.execute(
-                    """
-                    INSERT INTO learner_state (
-                        session_id,
-                        concept,
-                        mastery,
-                        confidence,
-                        attempts,
-                        correct_attempts,
-                        recent_score,
-                        needs_examples,
-                        needs_step_by_step,
-                        updated_at,
-                        last_reviewed_at,
-                        next_review_at,
-                        review_interval_days
-                    )
-                    VALUES (
-                        ?,
-                        ?,
-                        0.0,
-                        ?,
-                        1,
-                        0,
-                        ?,
-                        1,
-                        1,
-                        ?,
-                        ?,
-                        ?,
-                        ?
-                    )
-                    """,
-                    (
-                        session_id,
-                        concept,
-                        initial_confidence,
-                        score,
-                        now.isoformat(),
-                        now.isoformat(),
-                        next_review.isoformat(),
-                        review_interval,
-                    ),
-                )
+    for concept in missed_concepts:
+        res = supabase.table("learner_state").select("*").eq("session_id", session_id).eq("concept", concept).maybe_single().execute()
+        row = res.data
+        
+        review_interval = 1.0
+        next_review = now + timedelta(days=review_interval)
+        confidence_drop = {"low": 0.05, "medium": 0.10, "high": 0.15}.get(misconception_severity, 0.10)
+        
+        if row:
+            attempts = row.get("attempts", 0) + 1
+            correct_attempts = row.get("correct_attempts", 0)
+            mastery = (correct_attempts / attempts * 100) if attempts > 0 else 0.0
+            confidence = max(0.0, row.get("confidence", 0.5) - confidence_drop)
+            
+            supabase.table("learner_state").update({
+                "mastery": mastery,
+                "confidence": confidence,
+                "attempts": attempts,
+                "recent_score": score,
+                "needs_examples": 1,
+                "needs_step_by_step": 1,
+                "last_reviewed_at": now.isoformat(),
+                "next_review_at": next_review.isoformat(),
+                "review_interval_days": review_interval,
+                "updated_at": now.isoformat()
+            }).eq("session_id", session_id).eq("concept", concept).execute()
+        else:
+            initial_confidence = {"low": 0.45, "medium": 0.40, "high": 0.35}.get(misconception_severity, 0.40)
+            supabase.table("learner_state").insert({
+                "session_id": session_id,
+                "concept": concept,
+                "mastery": 0.0,
+                "confidence": initial_confidence,
+                "attempts": 1,
+                "correct_attempts": 0,
+                "recent_score": score,
+                "needs_examples": 1,
+                "needs_step_by_step": 1,
+                "updated_at": now.isoformat(),
+                "last_reviewed_at": now.isoformat(),
+                "next_review_at": next_review.isoformat(),
+                "review_interval_days": review_interval
+            }).execute()
 
 def normalize_misconception(text: str | None) -> str:
     if not text:
         return ""
-
     text = text.lower().strip()
-
-    # Normalize formatting
     text = re.sub(r"[^a-z0-9\s]", " ", text)
     text = re.sub(r"\s+", " ", text)
-
-    # Remove common filler phrases
     filler_phrases = [
-        "the student",
-        "the learner",
-        "student",
-        "learner",
-        "seems to",
-        "appears to",
-        "shows a misunderstanding of",
-        "shows misunderstanding of",
-        "has a misconception about",
-        "has a misunderstanding about",
-        "misunderstands",
+        "the student", "the learner", "student", "learner", "seems to", "appears to",
+        "shows a misunderstanding of", "shows misunderstanding of",
+        "has a misconception about", "has a misunderstanding about", "misunderstands",
     ]
-
     for phrase in filler_phrases:
         text = text.replace(phrase, " ")
-
     text = re.sub(r"\s+", " ", text).strip()
-
     return text
 
 def record_misconception(
@@ -612,189 +240,58 @@ def record_misconception(
     evidence: str | None = None,
     suggested_intervention: str | None = None,
 ):
-    """
-    Persist a detected misconception without modifying learner mastery.
-
-    Mastery and confidence are updated centrally by
-    update_learner_state(). This function is responsible only for
-    misconception memory and recurrence tracking.
-    """
-
     now = datetime.utcnow().isoformat()
+    existing = None
+    if misconception:
+        res = supabase.table("misconceptions").select("id, occurrences").eq("session_id", session_id).ilike("concept", concept).ilike("misconception", misconception).eq("resolved", 0).order("id", desc=True).limit(1).execute()
+        existing = res.data[0] if res.data else None
 
-    with get_conn() as conn:
-
-        # ---------------------------------------------------------
-        # Persist / update misconception history
-        # ---------------------------------------------------------
-        existing = None
-
-        if misconception:
-            existing = conn.execute(
-                """
-                SELECT id, occurrences
-                FROM misconceptions
-                WHERE session_id=?
-                  AND LOWER(concept)=LOWER(?)
-                  AND LOWER(misconception)=LOWER(?)
-                  AND resolved=0
-                ORDER BY id DESC
-                LIMIT 1
-                """,
-                (
-                    session_id,
-                    concept,
-                    misconception,
-                ),
-            ).fetchone()
-
-        if existing:
-            conn.execute(
-                """
-                UPDATE misconceptions
-                SET occurrences=?,
-                    severity=?,
-                    evidence=?,
-                    suggested_intervention=?,
-                    last_detected=?,
-                    resolved=0
-                WHERE id=?
-                """,
-                (
-                    existing["occurrences"] + 1,
-                    severity,
-                    evidence,
-                    suggested_intervention,
-                    now,
-                    existing["id"],
-                ),
-            )
-
-        else:
-            conn.execute(
-                """
-                INSERT INTO misconceptions (
-                    session_id,
-                    concept,
-                    misconception,
-                    evidence,
-                    severity,
-                    suggested_intervention,
-                    occurrences,
-                    resolved,
-                    first_detected,
-                    last_detected
-                )
-                VALUES (?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
-                """,
-                (
-                    session_id,
-                    concept,
-                    misconception or "unspecified_misconception",
-                    evidence,
-                    severity,
-                    suggested_intervention,
-                    now,
-                    now,
-                ),
-            )
+    if existing:
+        supabase.table("misconceptions").update({
+            "occurrences": existing["occurrences"] + 1,
+            "severity": severity,
+            "evidence": evidence,
+            "suggested_intervention": suggested_intervention,
+            "last_detected": now,
+            "resolved": 0
+        }).eq("id", existing["id"]).execute()
+    else:
+        supabase.table("misconceptions").insert({
+            "session_id": session_id,
+            "concept": concept,
+            "misconception": misconception or "unspecified_misconception",
+            "evidence": evidence,
+            "severity": severity,
+            "suggested_intervention": suggested_intervention,
+            "occurrences": 1,
+            "resolved": 0,
+            "first_detected": now,
+            "last_detected": now
+        }).execute()
 
 def get_active_misconceptions(
     session_id: str,
     concept: str | None = None,
 ) -> list[dict]:
-    """
-    Return unresolved misconceptions for a learner.
-    """
-
-    with get_conn() as conn:
-        if concept:
-            rows = conn.execute(
-                """
-                SELECT *
-                FROM misconceptions
-                WHERE session_id=?
-                  AND LOWER(concept)=LOWER(?)
-                  AND resolved=0
-                ORDER BY occurrences DESC, last_detected DESC
-                """,
-                (session_id, concept),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """
-                SELECT *
-                FROM misconceptions
-                WHERE session_id=?
-                  AND resolved=0
-                ORDER BY occurrences DESC, last_detected DESC
-                """,
-                (session_id,),
-            ).fetchall()
-
-    return [dict(row) for row in rows]
-
+    query = supabase.table("misconceptions").select("*").eq("session_id", session_id).eq("resolved", 0).order("occurrences", desc=True).order("last_detected", desc=True)
+    if concept:
+        query = query.ilike("concept", concept)
+    res = query.execute()
+    return res.data
 
 def resolve_misconceptions(
     session_id: str,
     concept: str,
     misconception_text: str | None = None,
 ):
-    """
-    Mark active misconceptions for a concept as resolved
-    after successful reassessment.
-    """
-
-    with get_conn() as conn:
-        if misconception_text:
-            conn.execute(
-                """
-                UPDATE misconceptions
-                SET resolved=1
-                WHERE session_id=?
-                  AND LOWER(concept)=LOWER(?)
-                  AND LOWER(misconception)=LOWER(?)
-                  AND resolved=0
-                """,
-                (session_id, concept, misconception_text),
-            )
-        else:
-            conn.execute(
-                """
-                UPDATE misconceptions
-                SET resolved=1
-                WHERE session_id=?
-                  AND LOWER(concept)=LOWER(?)
-                  AND resolved=0
-                """,
-                (session_id, concept),
-            )
+    query = supabase.table("misconceptions").update({"resolved": 1}).eq("session_id", session_id).ilike("concept", concept).eq("resolved", 0)
+    if misconception_text:
+        query = query.ilike("misconception", misconception_text)
+    query.execute()
 
 def get_learner_state(session_id: str) -> list[dict]:
-    with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT
-                concept,
-                mastery,
-                confidence,
-                attempts,
-                correct_attempts,
-                recent_score,
-                needs_examples,
-                needs_step_by_step,
-                updated_at,
-                last_reviewed_at,
-                next_review_at,
-                review_interval_days
-            FROM learner_state
-            WHERE session_id=?
-            ORDER BY mastery ASC
-            """,
-            (session_id,),
-        ).fetchall()
-
-    return [dict(row) for row in rows]
+    res = supabase.table("learner_state").select("*").eq("session_id", session_id).order("mastery").execute()
+    return res.data
 
 def record_metacognitive_checkin(
     session_id: str,
@@ -803,180 +300,95 @@ def record_metacognitive_checkin(
     reflection: str | None = None,
 ):
     now = datetime.utcnow().isoformat()
-
-    with get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO metacognitive_checkins (
-                session_id,
-                concept,
-                confidence_rating,
-                reflection,
-                created_at
-            )
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (
-                session_id,
-                concept,
-                confidence_rating,
-                reflection,
-                now,
-            ),
-        )
+    supabase.table("metacognitive_checkins").insert({
+        "session_id": session_id,
+        "concept": concept,
+        "confidence_rating": confidence_rating,
+        "reflection": reflection,
+        "created_at": now
+    }).execute()
 
 def get_latest_metacognitive_checkin(
     session_id: str,
     concept: str,
-    
 ):
-    with get_conn() as conn:
-        row = conn.execute(
-            """
-            SELECT confidence_rating
-            FROM metacognitive_checkins
-            WHERE session_id = ? AND LOWER(concept) = LOWER(?)
-            ORDER BY id DESC
-            LIMIT 1
-            """,
-            (session_id, concept),
-        ).fetchone()
-
-    return row["confidence_rating"] if row else None
+    res = supabase.table("metacognitive_checkins").select("confidence_rating").eq("session_id", session_id).ilike("concept", concept).order("id", desc=True).limit(1).execute()
+    return res.data[0]["confidence_rating"] if res.data else None
 
 def upsert_flashcard_progress(session_id: str, total: int, mastered: int):
     now = datetime.utcnow().isoformat()
-    with get_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO progress (session_id, flashcards_total, flashcards_mastered, updated_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(session_id) DO UPDATE SET
-                flashcards_total = excluded.flashcards_total,
-                flashcards_mastered = excluded.flashcards_mastered,
-                updated_at = excluded.updated_at
-            """,
-            (session_id, total, mastered, now),
-        )
-
+    res = supabase.table("progress").select("*").eq("session_id", session_id).maybe_single().execute()
+    if res.data:
+        supabase.table("progress").update({
+            "flashcards_total": total,
+            "flashcards_mastered": mastered,
+            "updated_at": now
+        }).eq("session_id", session_id).execute()
+    else:
+        supabase.table("progress").insert({
+            "session_id": session_id,
+            "flashcards_total": total,
+            "flashcards_mastered": mastered,
+            "updated_at": now
+        }).execute()
 
 def get_progress(session_id: str) -> dict[str, float | int]:
-    with get_conn() as conn:
-        row = conn.execute(
-            "SELECT * FROM progress WHERE session_id=?",
-            (session_id,),
-        ).fetchone()
+    res = supabase.table("progress").select("*").eq("session_id", session_id).maybe_single().execute()
+    row = res.data
     if not row:
         return {"quiz_avg": 0, "mastery_pct": 0}
-    quiz_avg = row["quiz_score_total"] / max(row["quiz_attempts"], 1)
-    mastery_pct = row["flashcards_mastered"] / max(row["flashcards_total"], 1) * 100
+    quiz_avg = row.get("quiz_score_total", 0) / max(row.get("quiz_attempts", 0), 1)
+    mastery_pct = row.get("flashcards_mastered", 0) / max(row.get("flashcards_total", 0), 1) * 100
     return {"quiz_avg": round(quiz_avg, 1), "mastery_pct": round(mastery_pct)}
 
-
 def upsert_card_schedule(session_id: str, card_id: str, front: str, next_review: str):
-    with get_conn() as conn:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO card_schedule (id, session_id, front, next_review)
-            VALUES (?, ?, ?, ?)
-            """,
-            (card_id, session_id, front, next_review),
-        )
-
+    res = supabase.table("card_schedule").select("id").eq("id", card_id).maybe_single().execute()
+    if not res.data:
+        supabase.table("card_schedule").insert({
+            "id": card_id,
+            "session_id": session_id,
+            "front": front,
+            "next_review": next_review
+        }).execute()
 
 def get_card_schedule(card_id: str):
-    with get_conn() as conn:
-        return conn.execute(
-            "SELECT * FROM card_schedule WHERE id=?",
-            (card_id,),
-        ).fetchone()
-
+    res = supabase.table("card_schedule").select("*").eq("id", card_id).maybe_single().execute()
+    return res.data
 
 def update_card_schedule(card_id: str, easiness: float, interval: int, repetitions: int, next_review: str):
-    with get_conn() as conn:
-        conn.execute(
-            """
-            UPDATE card_schedule
-            SET easiness=?, interval=?, repetitions=?, next_review=?
-            WHERE id=?
-            """,
-            (easiness, interval, repetitions, next_review, card_id),
-        )
-
+    supabase.table("card_schedule").update({
+        "easiness": easiness,
+        "interval": interval,
+        "repetitions": repetitions,
+        "next_review": next_review
+    }).eq("id", card_id).execute()
 
 def get_due_card_ids(session_id: str) -> list[str]:
-    with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT id FROM card_schedule
-            WHERE session_id=?
-            ORDER BY
-                CASE WHEN next_review <= datetime('now') THEN 0 ELSE 1 END,
-                next_review ASC
-            """,
-            (session_id,),
-        ).fetchall()
+    # Supabase/Postgres doesn't directly support the SQLite CASE WHEN sorting via REST simply,
+    # so we pull all cards for session and sort in Python.
+    res = supabase.table("card_schedule").select("id, next_review").eq("session_id", session_id).execute()
+    now_str = datetime.utcnow().isoformat()
+    rows = res.data
+    def sort_key(row):
+        due = 0 if row.get("next_review", "") <= now_str else 1
+        return (due, row.get("next_review", ""))
+    rows.sort(key=sort_key)
     return [row["id"] for row in rows]
 
 def get_learning_analytics(session_id: str) -> dict:
-    """
-    Return an adaptive-learning summary for a learner session.
-    """
-
-    with get_conn() as conn:
-        states = conn.execute(
-            """
-            SELECT
-                concept,
-                mastery,
-                confidence,
-                attempts,
-                correct_attempts,
-                recent_score,
-                needs_examples,
-                needs_step_by_step,
-                updated_at,
-                last_reviewed_at,
-                next_review_at,
-                review_interval_days
-            FROM learner_state
-            WHERE session_id=?
-            ORDER BY mastery DESC
-            """,
-            (session_id,),
-        ).fetchall()
-
-    state_list = [dict(row) for row in states]
-
+    state_list = get_learner_state(session_id)
+    state_list.sort(key=lambda x: x.get("mastery", 0), reverse=True)
+    
     total_concepts = len(state_list)
-
-    average_mastery = (
-        sum(item["mastery"] for item in state_list)
-        / total_concepts
-        if total_concepts
-        else 0.0
-    )
-
-    mastered_concepts = [
-        item
-        for item in state_list
-        if item["mastery"] >= 70
-    ]
-
-    weak_concepts = [
-        item
-        for item in state_list
-        if item["mastery"] < 70
-    ]
-
-    due_reviews = [
-        item
-        for item in state_list
-        if item.get("next_review_at")
-        and item["next_review_at"] <= datetime.utcnow().isoformat()
-    ]
-
+    average_mastery = sum(item.get("mastery", 0) for item in state_list) / total_concepts if total_concepts else 0.0
+    mastered_concepts = [item for item in state_list if item.get("mastery", 0) >= 70]
+    weak_concepts = [item for item in state_list if item.get("mastery", 0) < 70]
+    
+    now_iso = datetime.utcnow().isoformat()
+    due_reviews = [item for item in state_list if item.get("next_review_at") and item["next_review_at"] <= now_iso]
+    
     misconceptions = get_active_misconceptions(session_id)
+    average_confidence = sum(item.get("confidence", 0) for item in state_list) / total_concepts if total_concepts else 0.0
 
     return {
         "overall_mastery": round(average_mastery, 2),
@@ -985,15 +397,7 @@ def get_learning_analytics(session_id: str) -> dict:
         "weak_concepts": len(weak_concepts),
         "due_reviews": len(due_reviews),
         "active_misconceptions": len(misconceptions),
-        "average_confidence": round(
-            (
-                sum(item["confidence"] for item in state_list)
-                / total_concepts
-            )
-            if total_concepts
-            else 0.0,
-            2,
-        ),
+        "average_confidence": round(average_confidence, 2),
         "concepts": state_list,
         "weak_concept_details": weak_concepts,
         "due_review_details": due_reviews,
@@ -1001,78 +405,74 @@ def get_learning_analytics(session_id: str) -> dict:
     }
 
 def get_cumulative_learning_analytics(user_id: int) -> dict:
-    """
-    Return a cumulative adaptive-learning summary across all sessions for a user.
-    """
-    with get_conn() as conn:
-        states = conn.execute(
-            """
-            SELECT
-                ls.concept,
-                AVG(ls.mastery) as mastery,
-                AVG(ls.confidence) as confidence,
-                SUM(ls.attempts) as attempts,
-                SUM(ls.correct_attempts) as correct_attempts,
-                AVG(ls.recent_score) as recent_score,
-                SUM(ls.needs_examples) as needs_examples,
-                SUM(ls.needs_step_by_step) as needs_step_by_step,
-                MAX(ls.updated_at) as updated_at,
-                MAX(ls.last_reviewed_at) as last_reviewed_at,
-                MIN(ls.next_review_at) as next_review_at,
-                AVG(ls.review_interval_days) as review_interval_days
-            FROM learner_state ls
-            JOIN sessions s ON ls.session_id = s.session_id
-            WHERE s.user_id = ?
-            GROUP BY ls.concept
-            ORDER BY mastery DESC
-            """,
-            (user_id,),
-        ).fetchall()
-
-    state_list = [dict(row) for row in states]
+    # Requires an RPC or complex joins. Since REST doesn't support JOINs natively without FKs cleanly mapped in PostgREST,
+    # and we have them mapped, we can do it via a Supabase query if needed, but it's simpler to fetch all sessions for the user and aggregate in Python.
+    res_sessions = supabase.table("sessions").select("session_id").eq("user_id", user_id).execute()
+    session_ids = [s["session_id"] for s in res_sessions.data]
+    
+    if not session_ids:
+        return {
+            "overall_mastery": 0.0, "average_confidence": 0.5, "total_concepts": 0,
+            "mastered_concepts": 0, "weak_concepts": 0, "due_reviews": 0,
+            "active_misconceptions": 0, "resolved_misconceptions": 0,
+            "concepts": [], "weak_concept_details": [], "due_review_details": [],
+            "misconceptions": [], "resolved_misconceptions_list": []
+        }
+    
+    res_ls = supabase.table("learner_state").select("*").in_("session_id", session_ids).execute()
+    # Aggregation in python
+    concept_map = {}
+    for row in res_ls.data:
+        c = row["concept"]
+        if c not in concept_map:
+            concept_map[c] = []
+        concept_map[c].append(row)
+        
+    state_list = []
+    for c, rows in concept_map.items():
+        state_list.append({
+            "concept": c,
+            "mastery": sum(r["mastery"] for r in rows) / len(rows),
+            "confidence": sum(r["confidence"] for r in rows) / len(rows),
+            "attempts": sum(r["attempts"] for r in rows),
+            "correct_attempts": sum(r["correct_attempts"] for r in rows),
+            "recent_score": sum(r["recent_score"] for r in rows) / len(rows),
+            "needs_examples": sum(r["needs_examples"] for r in rows),
+            "needs_step_by_step": sum(r["needs_step_by_step"] for r in rows),
+            "updated_at": max(r["updated_at"] for r in rows),
+            "last_reviewed_at": max((r["last_reviewed_at"] for r in rows if r.get("last_reviewed_at")), default=None),
+            "next_review_at": min((r["next_review_at"] for r in rows if r.get("next_review_at")), default=None),
+            "review_interval_days": sum(r["review_interval_days"] for r in rows) / len(rows)
+        })
+    state_list.sort(key=lambda x: x["mastery"], reverse=True)
+    
     total_concepts = len(state_list)
-    average_mastery = (
-        sum(item["mastery"] for item in state_list) / total_concepts
-        if total_concepts
-        else 0.0
-    )
-    average_confidence = (
-        sum(item["confidence"] for item in state_list) / total_concepts
-        if total_concepts
-        else 0.5
-    )
-
+    average_mastery = sum(item["mastery"] for item in state_list) / total_concepts if total_concepts else 0.0
+    average_confidence = sum(item["confidence"] for item in state_list) / total_concepts if total_concepts else 0.5
     mastered_concepts = [item for item in state_list if item["mastery"] >= 70]
     weak_concepts = [item for item in state_list if item["mastery"] < 70]
-    
-    import datetime
-    now_iso = datetime.datetime.utcnow().isoformat()
-    due_reviews = [
-        item for item in state_list
-        if item["next_review_at"] and item["next_review_at"] <= now_iso
-    ]
+    now_iso = datetime.utcnow().isoformat()
+    due_reviews = [item for item in state_list if item.get("next_review_at") and item["next_review_at"] <= now_iso]
 
-    with get_conn() as conn:
-        misc = conn.execute(
-            """
-            SELECT
-                m.id,
-                m.concept,
-                m.misconception,
-                m.severity,
-                SUM(m.occurrences) as occurrences,
-                MAX(m.resolved) as resolved,
-                m.suggested_intervention
-            FROM misconceptions m
-            JOIN sessions s ON m.session_id = s.session_id
-            WHERE s.user_id = ?
-            GROUP BY m.concept, m.misconception
-            ORDER BY occurrences DESC
-            """,
-            (user_id,),
-        ).fetchall()
-
-    misc_list = [dict(row) for row in misc]
+    res_misc = supabase.table("misconceptions").select("*").in_("session_id", session_ids).execute()
+    misc_map = {}
+    for row in res_misc.data:
+        key = (row["concept"], row["misconception"])
+        if key not in misc_map:
+            misc_map[key] = []
+        misc_map[key].append(row)
+        
+    misc_list = []
+    for (c, m), rows in misc_map.items():
+        misc_list.append({
+            "concept": c,
+            "misconception": m,
+            "severity": rows[0]["severity"],
+            "occurrences": sum(r["occurrences"] for r in rows),
+            "resolved": max(r["resolved"] for r in rows),
+            "suggested_intervention": rows[0]["suggested_intervention"]
+        })
+    misc_list.sort(key=lambda x: x["occurrences"], reverse=True)
     active_misc = [m for m in misc_list if not m["resolved"]]
     resolved_misc = [m for m in misc_list if m["resolved"]]
 
@@ -1086,23 +486,77 @@ def get_cumulative_learning_analytics(user_id: int) -> dict:
         "active_misconceptions": len(active_misc),
         "resolved_misconceptions": len(resolved_misc),
         "concepts": state_list,
-        "weak_concept_details": [
-            {
-                "concept": c["concept"],
-                "mastery": c["mastery"],
-                "confidence": c["confidence"]
-            }
-            for c in weak_concepts
-        ],
-        "due_review_details": [
-            {
-                "concept": c["concept"],
-                "mastery": c["mastery"],
-                "confidence": c["confidence"],
-                "next_review_at": c["next_review_at"]
-            }
-            for c in due_reviews
-        ],
+        "weak_concept_details": [{"concept": c["concept"], "mastery": c["mastery"], "confidence": c["confidence"]} for c in weak_concepts],
+        "due_review_details": [{"concept": c["concept"], "mastery": c["mastery"], "confidence": c["confidence"], "next_review_at": c["next_review_at"]} for c in due_reviews],
         "misconceptions": active_misc,
         "resolved_misconceptions_list": resolved_misc,
     }
+
+def save_user(username: str, password_hash: str) -> int:
+    now = datetime.utcnow().isoformat()
+    res = supabase.table("users").insert({
+        "username": username,
+        "password_hash": password_hash,
+        "created_at": now
+    }).execute()
+    return res.data[0]["id"]
+
+def get_user_by_username(username: str) -> dict | None:
+    res = supabase.table("users").select("*").eq("username", username).maybe_single().execute()
+    return res.data
+
+def get_user_by_id(user_id: int) -> dict | None:
+    res = supabase.table("users").select("*").eq("id", user_id).maybe_single().execute()
+    return res.data
+
+def create_auth_token(user_id: int, token: str):
+    now = datetime.utcnow().isoformat()
+    supabase.table("auth_tokens").insert({
+        "token": token,
+        "user_id": user_id,
+        "created_at": now
+    }).execute()
+
+def get_user_id_by_token(token: str) -> int | None:
+    res = supabase.table("auth_tokens").select("user_id").eq("token", token).maybe_single().execute()
+    return res.data["user_id"] if res.data else None
+
+def delete_auth_token(token: str):
+    supabase.table("auth_tokens").delete().eq("token", token).execute()
+
+def save_learner_profile(
+    session_id: str,
+    learning_style: str = "adaptive",
+    preferred_difficulty: str = "medium",
+    strengths: list[str] | None = None,
+    weaknesses: list[str] | None = None,
+):
+    now = datetime.utcnow().isoformat()
+    # Preserving exact JSON string compatibility for strengths/weaknesses as per contract
+    strengths_str = json.dumps(strengths) if strengths else "[]"
+    weaknesses_str = json.dumps(weaknesses) if weaknesses else "[]"
+    
+    supabase.table("learner_profiles").upsert({
+        "session_id": session_id,
+        "learning_style": learning_style,
+        "preferred_difficulty": preferred_difficulty,
+        "strengths": strengths_str,
+        "weaknesses": weaknesses_str,
+        "updated_at": now
+    }).execute()
+
+def get_learner_profile(session_id: str) -> dict | None:
+    res = supabase.table("learner_profiles").select("*").eq("session_id", session_id).maybe_single().execute()
+    row = res.data
+    if not row:
+        return None
+    try:
+        row["strengths"] = json.loads(row["strengths"])
+    except Exception:
+        row["strengths"] = []
+    try:
+        row["weaknesses"] = json.loads(row["weaknesses"])
+    except Exception:
+        row["weaknesses"] = []
+    return row
+

@@ -1,6 +1,6 @@
 import functools
 from flask import request, jsonify
-from db import get_conn
+from db import get_user_id_by_token, supabase
 
 def require_auth(f):
     @functools.wraps(f)
@@ -15,23 +15,22 @@ def require_auth(f):
         if not token:
             return jsonify({"error": "unauthorized", "message": "Missing or invalid token"}), 401
         
-        with get_conn() as conn:
-            row = conn.execute("SELECT user_id FROM auth_tokens WHERE token=?", (token,)).fetchone()
-            if not row:
-                return jsonify({"error": "unauthorized", "message": "Invalid token"}), 401
-            
-            request.current_user_id = row["user_id"]
+        user_id = get_user_id_by_token(token)
+        if not user_id:
+            return jsonify({"error": "unauthorized", "message": "Invalid token"}), 401
+        
+        request.current_user_id = user_id
         
         return f(*args, **kwargs)
     return decorated_function
 
 def verify_session_owner(session_id, user_id):
-    with get_conn() as conn:
-        row = conn.execute("SELECT user_id FROM sessions WHERE session_id=?", (session_id,)).fetchone()
-        if not row:
-            return False, 404
-        if row["user_id"] != user_id:
-            return False, 403
+    res = supabase.table("sessions").select("user_id").eq("session_id", session_id).maybe_single().execute()
+    row = res.data
+    if not row:
+        return False, 404
+    if row["user_id"] != user_id:
+        return False, 403
     return True, 200
 
 def get_current_user_id():

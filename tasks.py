@@ -1,13 +1,16 @@
 import os
+import uuid
 import celery_app
 from celery import Task
 from processing.chunker import Chunker
 from processing.embedder import Embedder
 from retrieval.vector_store import VectorStore
 from routes.store import session_store
+from db import supabase
 
 class ProcessUploadTask(Task):
     def process_upload(self, session_id, filepath, title, original_filename, is_youtube=False):
+        local_tmp = None
         try:
             from loaders.loader_manager import LoaderManager
             from loaders.youtube_loader import YoutubeLoader
@@ -19,12 +22,24 @@ class ProcessUploadTask(Task):
             else:
                 import socket
                 print(f"CELERY DEBUG hostname={socket.gethostname()}")
-                print(f"CELERY DEBUG filepath={filepath}")
-                print(f"CELERY DEBUG exists_before_load={os.path.exists(filepath)}")
-                print(f"CELERY DEBUG size_before_load={os.path.getsize(filepath) if os.path.exists(filepath) else 'MISSING'}")
-                print(f"CELERY DEBUG uploads_dir={os.listdir('/data/uploads') if os.path.exists('/data/uploads') else 'DIRECTORY_MISSING'}")
+                print(f"CELERY DEBUG storage_path={filepath}")
+                
+                # filepath is actually the storage_path in Supabase now
+                storage_path = filepath
+                local_tmp = f"/tmp/{uuid.uuid4()}.pdf"
+                
+                # Download from Supabase Storage
+                file_bytes = supabase.storage.from_("uploads").download(storage_path)
+                with open(local_tmp, "wb") as f:
+                    f.write(file_bytes)
+                
+                print(f"CELERY DEBUG local_tmp={local_tmp}")
+                print(f"CELERY DEBUG exists_before_load={os.path.exists(local_tmp)}")
+                print(f"CELERY DEBUG size_before_load={os.path.getsize(local_tmp) if os.path.exists(local_tmp) else 'MISSING'}")
+                
                 loader = LoaderManager()
-                documents = loader.load(filepath)
+                documents = loader.load(local_tmp)
+                
             self.update_state(state="PROGRESS", meta={"stage": "Chunking text..."})
             chunker = Chunker()
             chunks = chunker.split(documents)
@@ -37,7 +52,7 @@ class ProcessUploadTask(Task):
             batch_size = 50
             for i in range(0, len(chunks), batch_size):
                 vector_store.add(embedder.model, chunks[i:i + batch_size])
-                vector_store.save()
+                # FAISS vector_store.save() removed, Supabase persists automatically
 
             full_text = "\n\n".join(doc.page_content for doc in chunks)
 
@@ -54,7 +69,12 @@ class ProcessUploadTask(Task):
 
         except Exception as e:
             raise
-
+        finally:
+            if local_tmp and os.path.exists(local_tmp):
+                try:
+                    os.remove(local_tmp)
+                except Exception as e:
+                    print(f"Failed to remove temporary file {local_tmp}: {e}")
 
 @celery_app.celery.task(bind=True, base=ProcessUploadTask, name="tasks.process_upload")
 def process_upload(self, session_id, filepath, title, original_filename, is_youtube=False):

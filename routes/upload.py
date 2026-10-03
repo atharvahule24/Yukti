@@ -11,10 +11,9 @@ from utils.validation import (
 )
 from utils.auth import require_auth, get_current_user_id
 from db import save_session_data
+from db import supabase
 
 upload_bp = Blueprint('upload', __name__)
-DATA_DIR = os.getenv("DATA_DIR", os.path.dirname(os.path.dirname(__file__)))
-UPLOADS_DIR = os.path.join(DATA_DIR, 'uploads')
 
 ALLOWED_EXTENSIONS = DEFAULT_ALLOWED_EXTENSIONS
 MAX_FILE_SIZE = int(os.getenv("MAX_UPLOAD_SIZE", 50 * 1024 * 1024))
@@ -29,7 +28,6 @@ def upload():
         from tasks import process_upload
 
         session_id = str(uuid.uuid4())
-        os.makedirs(UPLOADS_DIR, exist_ok=True)
         user_id = get_current_user_id()
         now = datetime.utcnow().isoformat()
 
@@ -46,13 +44,12 @@ def upload():
                 return jsonify({"error": "upload_failed", "message": "File too large"}), 400
 
             original_filename = file.filename
-            filepath = os.path.join(UPLOADS_DIR, filename)
-            file.save(filepath)
-            import socket
-            print(f"UPLOAD DEBUG hostname={socket.gethostname()}")
-            print(f"UPLOAD DEBUG filepath={filepath}")
-            print(f"UPLOAD DEBUG exists_after_save={os.path.exists(filepath)}")
-            print(f"UPLOAD DEBUG size_after_save={os.path.getsize(filepath) if os.path.exists(filepath) else 'MISSING'}")
+            
+            # Upload to Supabase Storage
+            storage_path = f"{session_id}/{filename}"
+            # file.read() returns bytes
+            supabase.storage.from_("uploads").upload(storage_path, file.read(), file_options={"content-type": file.content_type})
+
             title = filename
             save_session_data(session_id, {
                 "id": session_id,
@@ -62,7 +59,7 @@ def upload():
                 "full_text": ""
             }, user_id=user_id)
 
-            task = process_upload.delay(session_id, filepath, title, original_filename)
+            task = process_upload.delay(session_id, storage_path, title, original_filename)
 
         elif request.is_json:
             data, parse_error = parse_json_request(request)

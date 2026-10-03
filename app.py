@@ -21,7 +21,6 @@ from routes.learner import learner_bp
 from celery_app import celery
 
 app = Flask(__name__)
-init_db()
 allowed_origins = os.getenv(
     "ALLOWED_ORIGINS",
     "https://yukti-frontend-b4s9.onrender.com,http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174",
