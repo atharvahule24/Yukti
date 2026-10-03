@@ -21,7 +21,7 @@ class ProcessUploadTask(Task):
                 
             self.update_state(state="PROGRESS", meta={"stage": "Chunking text..."})
             chunker = Chunker()
-            chunks = chunker.chunk_documents(documents)
+            chunks = chunker.split(documents)
 
             for chunk in chunks:
                 chunk.metadata["session_id"] = session_id
