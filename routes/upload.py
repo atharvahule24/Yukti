@@ -48,7 +48,6 @@ def upload():
             original_filename = file.filename
             filepath = os.path.join(UPLOADS_DIR, filename)
             file.save(filepath)
-            import os
             import socket
             print(f"UPLOAD DEBUG hostname={socket.gethostname()}")
             print(f"UPLOAD DEBUG filepath={filepath}")

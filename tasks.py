@@ -16,7 +16,6 @@ class ProcessUploadTask(Task):
                 loader = YoutubeLoader()
                 documents = loader.load(filepath)
             else:
-                import os
                 import socket
                 print(f"CELERY DEBUG hostname={socket.gethostname()}")
                 print(f"CELERY DEBUG filepath={filepath}")
