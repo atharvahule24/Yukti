@@ -3,9 +3,7 @@ from celery import Task
 from processing.chunker import Chunker
 from processing.embedder import Embedder
 from retrieval.vector_store import VectorStore
-from learner.state import session_store
-from learner.mastery import initialize_mastery
-from learner.optimizer import AdaptiveOptimizer
+from routes.store import session_store
 
 class ProcessUploadTask(Task):
     def process_upload(self, session_id, filepath, title, original_filename, is_youtube=False):
@@ -41,8 +39,6 @@ class ProcessUploadTask(Task):
                 "original_filename": original_filename,
                 "content": full_text,
                 "is_youtube": is_youtube,
-                "mastery": initialize_mastery(),
-                "optimizer": AdaptiveOptimizer()
             }
 
             self.update_state(state="PROGRESS", meta={"stage": "Completed!"})
@@ -107,16 +103,6 @@ def generate_flashcards_task(self, session_id):
         flashcards = generator.generate(session["content"])
         
         session["flashcards"] = flashcards
-        
-        # Initialize mastery for the new flashcards
-        if "mastery" not in session:
-           session["mastery"] = initialize_mastery()
-        
-        if isinstance(flashcards, dict) and "cards" in flashcards:
-             for card in flashcards["cards"]:
-                card_id = f"card_{hash(card['question'])}"
-                if card_id not in session["mastery"]:
-                   session["mastery"][card_id] = 0.5 
 
         return flashcards or {"cards": []}
 
