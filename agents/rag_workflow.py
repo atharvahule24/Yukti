@@ -21,10 +21,7 @@ class RagWorkflow:
             temperature=0.3,
             max_tokens=1024,
             api_key=self.groq_api_key,
-            streaming=True,
-            model_kwargs={
-            "tool_choice": "none"
-            }
+            streaming=True
         )
         self.embedder = Embedder()
         # Ensure we use the index.faiss path structure correctly
