@@ -34,8 +34,10 @@ class ProcessUploadTask(Task):
 
             embedder = Embedder()
             vector_store = VectorStore()
-            vector_store.add(embedder.model, chunks)
-            vector_store.save()
+            batch_size = 50
+            for i in range(0, len(chunks), batch_size):
+                vector_store.add(embedder.model, chunks[i:i + batch_size])
+                vector_store.save()
 
             full_text = "\n\n".join(doc.page_content for doc in chunks)
 
