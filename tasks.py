@@ -47,14 +47,36 @@ class ProcessUploadTask(Task):
             for chunk in chunks:
                 chunk.metadata["session_id"] = session_id
 
+            chunk_count = len(chunks)
+            
+            # EXPLICIT MEMORY RELEASE: Destroy raw document data and heavy objects
+            del documents
+            del loader
+            del chunker
+            import gc
+            gc.collect()
+
             embedder = Embedder()
             vector_store = VectorStore()
             batch_size = 50
-            for i in range(0, len(chunks), batch_size):
-                vector_store.add(embedder.model, chunks[i:i + batch_size])
+            
+            full_text_parts = []
+            
+            while chunks:
+                batch = chunks[:batch_size]
+                del chunks[:batch_size]  # Pop chunks out of main list to free RAM
+                
+                for doc in batch:
+                    full_text_parts.append(doc.page_content)
+                    
+                vector_store.add(embedder.model, batch)
+                
                 # FAISS vector_store.save() removed, Supabase persists automatically
+                del batch
+                gc.collect()
 
-            full_text = "\n\n".join(doc.page_content for doc in chunks)
+            full_text = "\n\n".join(full_text_parts)
+            del full_text_parts
 
             session_store[session_id] = {
                 "id": session_id,
@@ -65,7 +87,7 @@ class ProcessUploadTask(Task):
             }
 
             self.update_state(state="PROGRESS", meta={"stage": "Completed!"})
-            return {"status": "ready", "session_id": session_id, "chunk_count": len(chunks)}
+            return {"status": "ready", "session_id": session_id, "chunk_count": chunk_count}
 
         except Exception as e:
             raise
