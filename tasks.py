@@ -83,6 +83,7 @@ class ProcessUploadTask(Task):
                 "title": title,
                 "original_filename": original_filename,
                 "content": full_text,
+                "full_text": full_text,
                 "is_youtube": is_youtube,
             }
 
@@ -114,7 +115,8 @@ def generate_graph_task(self, session_id):
         generator = GraphGenerator()
         graph_data = generator.generate(session["content"])
         
-        session["graph_data"] = graph_data
+        session["graph"] = graph_data
+        session_store[session_id] = session
         return graph_data
 
     except Exception as e:
@@ -134,6 +136,7 @@ def generate_notes_task(self, session_id):
         notes = generator.generate(session["content"])
         
         session["notes"] = notes
+        session_store[session_id] = session
         return notes or {"points": []}
 
     except Exception as e:
@@ -153,6 +156,7 @@ def generate_flashcards_task(self, session_id):
         flashcards = generator.generate(session["content"])
         
         session["flashcards"] = flashcards
+        session_store[session_id] = session
 
         return flashcards or {"cards": []}
 

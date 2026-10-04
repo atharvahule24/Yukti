@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getFlashcards, generateFlashcards, rateFlashcard, getFact } from '../../lib/api'
+import { getFlashcards, generateFlashcards, rateFlashcard, getFact, getTaskStatus } from '../../lib/api'
 import type { Flashcard } from '../../lib/api'
 import { Loader2, RotateCw, Check, X, SkipForward, BrainCircuit } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -34,11 +34,32 @@ export function FlashcardDecks({ sessionId }: { sessionId: string }) {
   const handleGenerate = async () => {
     if (!sessionId) return
     setGenerating(true)
-    try {
-      getFact(sessionId).then(res => setFact(res.fact)).catch(() => {})
-      const data = await generateFlashcards(sessionId)
-      setCards(data.cards || [])
-      setCurrentIndex(0)
+      try {
+        getFact(sessionId).then(res => setFact(res.fact)).catch(() => {})
+        const task = await generateFlashcards(sessionId) as any
+        
+        let attempts = 0
+        const maxAttempts = 60
+        
+        if (task.task_id) {
+          while (attempts < maxAttempts) {
+            const status = await getTaskStatus(task.task_id)
+            if (status.state === 'SUCCESS') {
+              const data = await getFlashcards(sessionId)
+              setCards(data.cards || [])
+              break
+            }
+            if (status.state === 'FAILURE' || status.state === 'REVOKED') {
+              throw new Error("Generation failed")
+            }
+            await new Promise(r => setTimeout(r, 2000))
+            attempts++
+          }
+        } else {
+          setCards(task.cards || [])
+        }
+        
+        setCurrentIndex(0)
       setCorrectCount(0)
       setHintVisible(false)
     } catch (e) {

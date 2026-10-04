@@ -149,9 +149,29 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
     setGenerating(true)
     try {
       getFact(sessionId).then(res => setFact(res.fact)).catch(() => {})
-      const { generateGraph } = await import('../../lib/api')
-      const data = await generateGraph(sessionId)
-      setGraphData(data)
+      const { generateGraph, getTaskStatus, getGraph } = await import('../../lib/api')
+      const task = await generateGraph(sessionId) as any
+      
+      let attempts = 0
+      const maxAttempts = 60
+      
+      if (task.task_id) {
+        while (attempts < maxAttempts) {
+          const status = await getTaskStatus(task.task_id)
+          if (status.state === 'SUCCESS') {
+            const data = await getGraph(sessionId)
+            setGraphData(data)
+            break
+          }
+          if (status.state === 'FAILURE' || status.state === 'REVOKED') {
+            throw new Error("Generation failed")
+          }
+          await new Promise(r => setTimeout(r, 2000))
+          attempts++
+        }
+      } else {
+        setGraphData(task)
+      }
     } catch (e) {
       console.error(e)
     } finally {
