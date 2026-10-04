@@ -13,6 +13,7 @@ export function FileUploader({ onSuccess }: { onSuccess: (sessionId: string) => 
   const [progress, setProgress] = useState(0)
   
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const isProcessingRef = useRef(false)
 
   const handleDrag = (e: React.DragEvent) => {
     e.preventDefault()
@@ -63,9 +64,11 @@ export function FileUploader({ onSuccess }: { onSuccess: (sessionId: string) => 
   }
 
   const handleUpload = async () => {
+  if (isProcessingRef.current) return
   if (tab === 'file' && !file) return
   if (tab === 'youtube' && !youtubeUrl) return
 
+  isProcessingRef.current = true
   setIsUploading(true)
   const progInt = simulateProgress()
 
@@ -112,6 +115,7 @@ if (res.task_id) {
 
 setProgress(100)
 setIsUploading(false)
+isProcessingRef.current = false
 
 toast.success('Ready to study!')
 
@@ -131,6 +135,7 @@ setTimeout(() => {
     const message = err instanceof Error ? err.message : 'Upload failed'
     toast.error(message)
     setIsUploading(false)
+    isProcessingRef.current = false
   }
 }
 
