@@ -105,16 +105,26 @@ def process_upload(self, session_id, filepath, title, original_filename, is_yout
 
 @celery_app.celery.task(bind=True, name="tasks.generate_graph")
 def generate_graph_task(self, session_id):
-    from generative.graph_generator import GraphGenerator
     try:
+        from processing.graph_extractor import extract_knowledge_graph
+        from processing.chunker import Chunker
+        from langchain_core.documents import Document
+
         session = session_store.get(session_id)
         if not session:
             raise ValueError(f"Session {session_id} not found.")
 
         self.update_state(state="PROGRESS", meta={"stage": "Generating Knowledge Graph..."})
-        generator = GraphGenerator()
-        graph_data = generator.generate(session["content"])
-        
+        full_text = session.get("full_text", "")
+        if not full_text:
+            raise ValueError("No text found for session")
+
+        chunks = Chunker().split([Document(page_content=full_text)])
+        graph_data = extract_knowledge_graph(chunks)
+
+        if "edges" in graph_data:
+            graph_data["links"] = graph_data.pop("edges")
+            
         session["graph"] = graph_data
         session_store[session_id] = session
         return graph_data
@@ -125,18 +135,28 @@ def generate_graph_task(self, session_id):
 
 @celery_app.celery.task(bind=True, name="tasks.generate_notes")
 def generate_notes_task(self, session_id):
-    from generative.notes_generator import NotesGenerator
     try:
+        from llm.generator import Generator
+        from agents.prompts import NOTES_PROMPT
+        from utils.json_helper import extract_json
+
         session = session_store.get(session_id)
         if not session:
             raise ValueError(f"Session {session_id} not found.")
 
         self.update_state(state="PROGRESS", meta={"stage": "Generating Notes..."})
-        generator = NotesGenerator()
-        notes = generator.generate(session["content"])
+        full_text = session.get("full_text", "")[:6000]
+        if not full_text:
+            raise ValueError("No text found for session")
+
+        generator = Generator(json_mode=True)
+        res = generator.chain.invoke({"context": full_text, "question": NOTES_PROMPT})
+        notes = extract_json(res)
         
-        session["notes"] = notes
-        session_store[session_id] = session
+        if notes:
+            session["notes"] = notes
+            session_store[session_id] = session
+            
         return notes or {"points": []}
 
     except Exception as e:
@@ -145,18 +165,36 @@ def generate_notes_task(self, session_id):
 
 @celery_app.celery.task(bind=True, name="tasks.generate_flashcards")
 def generate_flashcards_task(self, session_id):
-    from generative.flashcards_generator import FlashcardsGenerator
     try:
+        from llm.generator import Generator
+        from agents.prompts import FLASHCARD_GENERATION_PROMPT
+        from utils.json_helper import extract_json
+        from db import upsert_card_schedule, upsert_flashcard_progress
+
         session = session_store.get(session_id)
         if not session:
             raise ValueError(f"Session {session_id} not found.")
 
         self.update_state(state="PROGRESS", meta={"stage": "Generating Flashcards..."})
-        generator = FlashcardsGenerator()
-        flashcards = generator.generate(session["content"])
+        full_text = session.get("full_text", "")[:6000]
+        if not full_text:
+            raise ValueError("No text found for session")
+
+        generator = Generator(json_mode=True)
+        res = generator.chain.invoke({"context": full_text, "question": FLASHCARD_GENERATION_PROMPT})
+        flashcards = extract_json(res)
         
-        session["flashcards"] = flashcards
-        session_store[session_id] = session
+        if flashcards:
+            for i, c in enumerate(flashcards.get("cards", [])):
+                upsert_card_schedule(
+                    session_id=session_id,
+                    card_id=f"card_{i}",
+                    card_data=c
+                )
+            upsert_flashcard_progress(session_id, len(flashcards.get("cards", [])), 0, 0)
+            
+            session["flashcards"] = flashcards
+            session_store[session_id] = session
 
         return flashcards or {"cards": []}
 
