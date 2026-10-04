@@ -41,39 +41,44 @@ class ProcessUploadTask(Task):
                 documents = loader.load(local_tmp)
                 
             self.update_state(state="PROGRESS", meta={"stage": "Chunking text..."})
-            chunker = Chunker()
-            chunks = chunker.split(documents)
-
-            for chunk in chunks:
-                chunk.metadata["session_id"] = session_id
-
-            chunk_count = len(chunks)
             
-            # EXPLICIT MEMORY RELEASE: Destroy raw document data and heavy objects
-            del documents
+            # Create Embedder before we start allocating chunks, but after documents are loaded.
+            embedder = Embedder()
+            vector_store = VectorStore()
+            chunker = Chunker()
+            
+            full_text_parts = []
+            chunk_count = 0
+            
+            # O(1) pop strategy: reverse the list so pop() removes from the end (original front)
+            documents.reverse()
+            
+            while documents:
+                doc = documents.pop()
+                
+                # Chunk only a single document at a time
+                doc_chunks = chunker.split([doc])
+                
+                if not doc_chunks:
+                    del doc
+                    continue
+                    
+                for chunk in doc_chunks:
+                    chunk.metadata["session_id"] = session_id
+                    full_text_parts.append(chunk.page_content)
+                    
+                chunk_count += len(doc_chunks)
+                vector_store.add(embedder.model, doc_chunks)
+                
+                # Explicitly release temporary objects; Python refcount instantly reclaims them
+                del doc
+                del doc_chunks
+                
+            # EXPLICIT MEMORY RELEASE
             del loader
             del chunker
             import gc
             gc.collect()
-
-            embedder = Embedder()
-            vector_store = VectorStore()
-            batch_size = 50
-            
-            full_text_parts = []
-            
-            while chunks:
-                batch = chunks[:batch_size]
-                del chunks[:batch_size]  # Pop chunks out of main list to free RAM
-                
-                for doc in batch:
-                    full_text_parts.append(doc.page_content)
-                    
-                vector_store.add(embedder.model, batch)
-                
-                # FAISS vector_store.save() removed, Supabase persists automatically
-                del batch
-                gc.collect()
 
             full_text = "\n\n".join(full_text_parts)
             del full_text_parts
