@@ -175,6 +175,7 @@ def generate_flashcards_task(self, session_id):
         from agents.prompts import FLASHCARD_GENERATION_PROMPT
         from utils.json_helper import extract_json
         from db import upsert_card_schedule, upsert_flashcard_progress
+        from datetime import datetime
 
         session = session_store.get(session_id)
         if not session:
@@ -194,7 +195,8 @@ def generate_flashcards_task(self, session_id):
                 upsert_card_schedule(
                     session_id=session_id,
                     card_id=f"card_{i}",
-                    card_data=c
+                    front=c.get("front", ""),
+                    next_review=datetime.utcnow().isoformat()
                 )
             upsert_flashcard_progress(session_id, len(flashcards.get("cards", [])), 0, 0)
             
