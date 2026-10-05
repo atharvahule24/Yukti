@@ -28,7 +28,7 @@ def _normalise_session(data: dict[str, Any]) -> dict[str, Any]:
     session_id = data.get("id") or data.get("session_id")
     title = data.get("title") or data.get("filename") or "Untitled"
     created_at = data.get("created_at") or datetime.utcnow().isoformat()
-    full_text = data.get("full_text") or data.get("text") or ""
+    full_text = data.get("full_text") or data.get("text") or data.get("content") or ""
     data["id"] = session_id
     data["session_id"] = session_id
     data["title"] = title
@@ -37,6 +37,7 @@ def _normalise_session(data: dict[str, Any]) -> dict[str, Any]:
     data["created_at"] = created_at
     data["full_text"] = full_text
     data["text"] = full_text
+    data["content"] = full_text
     return data
 
 def save_session_data(session_id: str, data: dict[str, Any], user_id: int | None = None):
@@ -74,8 +75,11 @@ def get_session_data(session_id: str) -> dict[str, Any] | None:
     data.setdefault("filename", row["filename"])
     data.setdefault("original_filename", row["filename"])
     data.setdefault("created_at", row["created_at"])
-    data.setdefault("full_text", row["text"])
-    data.setdefault("text", row["text"])
+
+    full_text = data.get("full_text") or data.get("text") or data.get("content") or row.get("text") or ""
+    data["full_text"] = full_text
+    data["text"] = full_text
+    data["content"] = full_text
     return data
 
 def list_session_data(user_id: int | None = None) -> list[dict[str, Any]]:
