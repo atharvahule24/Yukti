@@ -330,6 +330,11 @@ QUESTION NOVELTY RULES:
             for question in previous_questions[-20:]
         )
 
+    if adaptive_plan.get("concept"):
+        concept_requirement = f'Every generated question MUST use:\n    concept = "{adaptive_plan["concept"]}"'
+    else:
+        concept_requirement = "Every generated question MUST identify a specific, non-empty concept tested from the material."
+
     custom_instruction = f"""
     Generate exactly {count} questions.
 
@@ -405,7 +410,7 @@ QUESTION NOVELTY RULES:
     - a difficulty field
     - difficulty exactly equal to "{difficulty}"
 
-    {f'Every generated question MUST use:\n    concept = "{adaptive_plan["concept"]}"' if adaptive_plan.get("concept") else 'Every generated question MUST identify a specific, non-empty concept tested from the material.'}
+    {concept_requirement}
 
     Never return null or empty concept.
     Never label a simple recall question as hard.
