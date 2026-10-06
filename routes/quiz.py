@@ -148,6 +148,7 @@ def generate_quiz(session_id):
     if parse_error:
         return json_error(parse_error)
     requested_difficulty = data.get("difficulty")
+    requested_concept = data.get("concept")
 
     count, count_error = validate_quiz_count(data.get("count", 5))
 
@@ -155,7 +156,7 @@ def generate_quiz(session_id):
         return json_error(count_error)
 
     # Get learner-adaptive plan FIRST
-    adaptive_context = get_next_learning_action(session_id)
+    adaptive_context = get_next_learning_action(session_id, concept=requested_concept)
     adaptive_plan = adaptive_context["question_plan"]
 
     # Adaptive difficulty takes priority when available
@@ -339,7 +340,7 @@ QUESTION NOVELTY RULES:
     generate generic questions from the chapter.
 
     TARGET CONCEPT:
-    {adaptive_plan.get("concept", "")}
+    {adaptive_plan.get("concept") or "Core concepts from the provided material"}
 
     ADAPTIVE TARGET:
     {adaptive_plan.get("target", "")}
@@ -404,8 +405,7 @@ QUESTION NOVELTY RULES:
     - a difficulty field
     - difficulty exactly equal to "{difficulty}"
 
-    Every generated question MUST use:
-    concept = "{adaptive_plan.get("concept", "")}"
+    {f'Every generated question MUST use:\n    concept = "{adaptive_plan["concept"]}"' if adaptive_plan.get("concept") else 'Every generated question MUST identify a specific, non-empty concept tested from the material.'}
 
     Never return null or empty concept.
     Never label a simple recall question as hard.
@@ -506,12 +506,11 @@ QUESTION NOVELTY RULES:
             if not s["concept"]:
                 raise ValueError("Generated short-answer question has invalid concept.")
             
-            quiz = {
-                "mcq": mcq.get("mcq", []),
-                "short_answer": sa.get("short_answer", [])
-            }
+        quiz = {
+            "mcq": mcq.get("mcq", []),
+            "short_answer": sa.get("short_answer", [])
+        }
 
-            # Preserve the previously generated quiz before replacing it.
         # Preserve the previously generated quiz before replacing it.
         if previous_quiz:
             question_history.append(previous_quiz)

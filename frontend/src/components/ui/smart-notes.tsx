@@ -65,7 +65,7 @@ const maxAttempts = 60
 while (attempts < maxAttempts) {
 const status = await getTaskStatus(task.task_id)
 
-if (status.state === 'SUCCESS') {
+if (status.state === 'SUCCESS' || status.state === 'success') {
 const data = await getNotes(sessionId)
 const pts = Array.isArray(data) ? data : data.points || []
 
@@ -75,7 +75,7 @@ setLoading(false)
 break
 }
 
-if (status.state === 'FAILURE') {
+if (status.state === 'FAILURE' || status.state === 'failure') {
 throw new Error('Notes generation failed')
 }
 

@@ -124,8 +124,14 @@ def generate_graph_task(self, session_id):
         if not full_text:
             raise ValueError("No text found for session")
 
-        chunks = Chunker().split([Document(page_content=full_text)])
-        graph_data = extract_knowledge_graph(chunks)
+        if len(full_text) > 6000:
+            mid = len(full_text) // 2
+            sampled_text = f"{full_text[:2000]}\n\n{full_text[mid - 1000:mid + 1000]}\n\n{full_text[-2000:]}"
+        else:
+            sampled_text = full_text
+
+        chunks = Chunker().split([Document(page_content=sampled_text)])[:8]
+        graph_data = extract_knowledge_graph(chunks) or {"nodes": [], "edges": []}
 
         if "edges" in graph_data:
             graph_data["links"] = graph_data.pop("edges")

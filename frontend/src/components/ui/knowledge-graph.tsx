@@ -158,12 +158,12 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
       if (task.task_id) {
         while (attempts < maxAttempts) {
           const status = await getTaskStatus(task.task_id)
-          if (status.state === 'SUCCESS') {
+          if (status.state === 'SUCCESS' || status.state === 'success') {
             const data = await getGraph(sessionId)
             setGraphData(data)
             break
           }
-          if (status.state === 'FAILURE' || status.state === 'REVOKED') {
+          if (status.state === 'FAILURE' || status.state === 'failure' || status.state === 'REVOKED' || status.state === 'revoked') {
             throw new Error("Generation failed")
           }
           await new Promise(r => setTimeout(r, 2000))
