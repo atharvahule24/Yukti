@@ -384,6 +384,7 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
          onNodeClick={handleNodeClick}
          d3VelocityDecay={0.8} // Stop bouncing faster
          cooldownTicks={100} // Settle layout quickly
+         onEngineStop={() => fgRef.current?.zoomToFit(400, 50)}
        />
     </div>
   )

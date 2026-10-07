@@ -189,16 +189,6 @@ def generate_quiz(session_id):
     Reason for this adaptation:
     {adaptive_plan.get("reason", "")}
 
-    PREVIOUSLY ASKED QUESTIONS:
-{previous_questions_text if previous_questions_text else "None"}
-
-QUESTION NOVELTY RULES:
-
-- Do NOT repeat any previously asked question.
-- Do NOT merely rephrase a previously asked question.
-- Create a genuinely different scenario, context, reasoning path, or application.
-- The new question must still assess the TARGET CONCEPT and ADAPTIVE TARGET.
-
     Generate the question so that it follows BOTH the adaptive target
     and the question type.
 
@@ -414,6 +404,14 @@ QUESTION NOVELTY RULES:
 
     Never return null or empty concept.
     Never label a simple recall question as hard.
+
+    PREVIOUSLY ASKED QUESTIONS:
+{previous_questions_text if previous_questions_text else "None"}
+
+QUESTION NOVELTY RULES:
+- Do NOT repeat any previously asked question.
+- Do NOT merely rephrase a previously asked question.
+- Create a genuinely different scenario, context, reasoning path, or application.
 
     """ + adaptive_instruction
     
