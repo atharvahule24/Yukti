@@ -111,7 +111,7 @@ def record_quiz_score(session_id: str, score: int | float):
     res.data = res.data[0] if res.data else None
     if res.data:
         new_attempts = (res.data.get("quiz_attempts") or 0) + 1
-        new_score = (res.data.get("quiz_score_total") or 0) + score
+        new_score = int((res.data.get("quiz_score_total") or 0) + score)
         supabase.table("progress").update({
             "quiz_attempts": new_attempts,
             "quiz_score_total": new_score,
@@ -121,7 +121,7 @@ def record_quiz_score(session_id: str, score: int | float):
         supabase.table("progress").insert({
             "session_id": session_id,
             "quiz_attempts": 1,
-            "quiz_score_total": score,
+            "quiz_score_total": int(score),
             "updated_at": now
         }).execute()
 
