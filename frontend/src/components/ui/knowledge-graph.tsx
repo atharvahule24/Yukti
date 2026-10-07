@@ -160,7 +160,12 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
           const status = await getTaskStatus(task.task_id)
           if (status.state === 'SUCCESS' || status.state === 'success') {
             const data = await getGraph(sessionId)
+            if (data.nodes.length > 0) {
+              const root = data.nodes[0]
+              setExpandedNodes(new Set([root.id]))
+            }
             setGraphData(data)
+            fgRef.current?.zoomToFit(400)
             break
           }
           if (status.state === 'FAILURE' || status.state === 'failure' || status.state === 'REVOKED' || status.state === 'revoked') {
@@ -170,7 +175,12 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
           attempts++
         }
       } else {
+        if (task.nodes && task.nodes.length > 0) {
+          const root = task.nodes[0]
+          setExpandedNodes(new Set([root.id]))
+        }
         setGraphData(task)
+        fgRef.current?.zoomToFit(400)
       }
     } catch (e) {
       console.error(e)
@@ -275,9 +285,6 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
          ref={fgRef}
          graphData={visibleGraphData}
          nodeLabel={() => ''}
-         // Radial layout
-         dagMode="radialout"
-         dagLevelDistance={180}
          nodeCanvasObject={(node: GraphNodeObject, ctx: CanvasRenderingContext2D, globalScale: number) => {
            const label = node.label || node.id;
            const isRoot = node.isRoot;

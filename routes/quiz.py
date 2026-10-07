@@ -159,10 +159,10 @@ def generate_quiz(session_id):
     adaptive_context = get_next_learning_action(session_id, concept=requested_concept)
     adaptive_plan = adaptive_context["question_plan"]
 
-    # Adaptive difficulty takes priority when available
+    # User-requested difficulty takes priority when available
     adaptive_difficulty = adaptive_plan.get("difficulty")
 
-    difficulty = adaptive_difficulty or requested_difficulty or "medium"
+    difficulty = requested_difficulty or adaptive_difficulty or "medium"
 
     print(">>> GENERATING NEW ADAPTIVE QUIZ")
     print(">>> ADAPTIVE PLAN:", adaptive_plan)

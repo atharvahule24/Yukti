@@ -198,6 +198,7 @@ def generate_flashcards_task(self, session_id):
         
         if flashcards:
             for i, c in enumerate(flashcards.get("cards", [])):
+                c["id"] = f"card_{i}"
                 upsert_card_schedule(
                     session_id=session_id,
                     card_id=f"card_{i}",

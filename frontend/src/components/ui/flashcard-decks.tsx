@@ -44,7 +44,7 @@ export function FlashcardDecks({ sessionId }: { sessionId: string }) {
         if (task.task_id) {
           while (attempts < maxAttempts) {
             const status = await getTaskStatus(task.task_id)
-            if (status.state === 'SUCCESS') {
+            if (status.state === 'SUCCESS' || status.state === 'success') {
               const data = await getFlashcards(sessionId)
               setCards(data.cards || [])
               break
