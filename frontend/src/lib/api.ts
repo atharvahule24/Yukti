@@ -519,17 +519,36 @@ export interface VideoRecommendation {
   concept: string
   difficulty: string
   action: string
+  topic?: string
+  base_concept?: string
+}
+
+export interface VideoRecommendationParams {
+  concept?: string
+  question?: string
+  feedback?: string
+  study_tip?: string
 }
 
 export async function getVideoRecommendation(
-  sessionId: string
+  sessionId: string,
+  params?: VideoRecommendationParams
 ): Promise<{
   learning_path: any
   video: VideoRecommendation
 }> {
-  const response = await apiFetch(
-    `${BASE_URL}/learner/video-recommendation/${sessionId}`
-  )
+  const queryParams = new URLSearchParams()
+  if (params?.concept) queryParams.set('concept', params.concept)
+  if (params?.question) queryParams.set('question', params.question)
+  if (params?.feedback) queryParams.set('feedback', params.feedback)
+  if (params?.study_tip) queryParams.set('study_tip', params.study_tip)
+
+  const queryString = queryParams.toString()
+  const url = `${BASE_URL}/learner/video-recommendation/${sessionId}${
+    queryString ? `?${queryString}` : ''
+  }`
+
+  const response = await apiFetch(url)
 
   return handleResponse(response)
 }

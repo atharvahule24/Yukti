@@ -593,7 +593,12 @@ const videoActions = [
 
 if (videoActions.includes(action)) {
 try {
-const videoResult = await getVideoRecommendation(sessionId)
+const videoResult = await getVideoRecommendation(sessionId, {
+  concept,
+  question: question.question,
+  feedback: result?.feedback,
+  study_tip: result?.study_tip,
+})
 setVideoRecommendation(videoResult.video)
 } catch (error) {
 console.error('Failed to load video recommendation:', error)
