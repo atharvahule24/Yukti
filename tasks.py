@@ -205,7 +205,7 @@ def generate_flashcards_task(self, session_id):
                     front=c.get("front", ""),
                     next_review=datetime.utcnow().isoformat()
                 )
-            upsert_flashcard_progress(session_id, len(flashcards.get("cards", [])), 0, 0)
+            upsert_flashcard_progress(session_id, len(flashcards.get("cards", [])), 0)
             
             session["flashcards"] = flashcards
             session_store[session_id] = session

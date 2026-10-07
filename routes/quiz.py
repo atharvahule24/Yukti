@@ -629,6 +629,7 @@ def grade_answer():
     if parse_error:
         return json_error(parse_error)
 
+    session_id = data.get("session_id", "")
     confidence_rating = data.get("confidence_rating")
     is_reassessment = data.get("is_reassessment", False)
 
@@ -659,9 +660,6 @@ def grade_answer():
         return json_error(
         "Quiz question is missing a concept. Please generate the quiz again."
     )
-    
-
-    session_id = data.get("session_id", "")
 
     canonical_concepts = get_canonical_concepts(
         concept

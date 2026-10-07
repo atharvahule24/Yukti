@@ -55,8 +55,7 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
              const targetId = endpointId(l.target)
              incomingCount[targetId] = (incomingCount[targetId] || 0) + 1
            })
-           const root = data.nodes.find(n => incomingCount[n.id] === 0) || data.nodes[0]
-           setExpandedNodes(new Set([root.id]))
+           setExpandedNodes(new Set(data.nodes.map(n => n.id)))
         }
         setLoading(false)
       })
@@ -161,8 +160,7 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
           if (status.state === 'SUCCESS' || status.state === 'success') {
             const data = await getGraph(sessionId)
             if (data.nodes.length > 0) {
-              const root = data.nodes[0]
-              setExpandedNodes(new Set([root.id]))
+              setExpandedNodes(new Set(data.nodes.map(n => n.id)))
             }
             setGraphData(data)
             fgRef.current?.zoomToFit(400)
@@ -176,8 +174,7 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
         }
       } else {
         if (task.nodes && task.nodes.length > 0) {
-          const root = task.nodes[0]
-          setExpandedNodes(new Set([root.id]))
+          setExpandedNodes(new Set(task.nodes.map((n: any) => n.id)))
         }
         setGraphData(task)
         fgRef.current?.zoomToFit(400)
