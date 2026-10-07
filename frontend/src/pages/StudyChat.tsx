@@ -58,12 +58,14 @@ export function StudyChat() {
         <div className="flex-1 flex flex-col lg:flex-row overflow-hidden p-4 gap-4">
           
           {/* Chat Column (Left) */}
-          <div className="flex-1 flex flex-col h-full min-w-0">
+          <div className={`flex-1 flex flex-col h-full min-w-0 ${activeTab === 'graph' ? 'hidden' : ''}`}>
             <ChatInterface sessionId={sessionId} />
           </div>
 
           {/* Tools Column (Right) */}
-          <div className="flex-1 lg:max-w-[40%] flex flex-col h-full min-w-0 bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden">
+          <div className={`flex-1 flex flex-col h-full min-w-0 bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden ${
+            activeTab === 'graph' ? 'w-full' : 'lg:max-w-[40%]'
+          }`}>
             
             {/* Tabs Header */}
             <div className="flex items-center gap-1 p-2 border-b border-[var(--border)] bg-[var(--bg-elevated)] shrink-0 overflow-x-auto scrollbar-hide">
@@ -88,11 +90,11 @@ export function StudyChat() {
             </div>
 
             {/* Tab Content */}
-            <div className="flex-1 overflow-y-auto p-4 smooth-scroll">
+            <div className={`flex-1 ${activeTab === 'graph' ? 'p-0 overflow-hidden' : 'overflow-y-auto p-4 smooth-scroll'}`}>
               {activeTab === 'notes' && <SmartNotes sessionId={sessionId} />}
               {activeTab === 'quiz' && <QuizPanel sessionId={sessionId} />}
               {activeTab === 'flashcards' && <FlashcardDecks sessionId={sessionId} />}
-              {activeTab === 'graph' && <div className="h-[600px] w-full"><KnowledgeGraph sessionId={sessionId} /></div>}
+              {activeTab === 'graph' && <div className="h-full w-full"><KnowledgeGraph sessionId={sessionId} /></div>}
             </div>
 
           </div>
