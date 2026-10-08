@@ -1,3 +1,4 @@
+import json
 from utils.auth import require_session_owner
 from difflib import SequenceMatcher
 import re
@@ -10,6 +11,7 @@ from agents.prompts import (
     QUIZ_MCQ_PROMPT,
     QUIZ_SHORT_ANSWER_PROMPT,
     TARGETED_REASSESSMENT_PROMPT,
+    QUIZ_GROUNDING_VALIDATOR_PROMPT,
 )
 from agents.prompts import GRADING_PROMPT
 from utils.json_helper import extract_json
@@ -345,6 +347,16 @@ STRICT GROUNDING:
   about the target concept instead.
 - The adaptive plan NEVER overrides source-grounding.
 
+SOURCE-FIRST FALLBACK:
+Before constructing a question, verify that the source explicitly contains
+enough information for the requested question type and difficulty.
+
+If not:
+- keep the TARGET CONCEPT,
+- keep the source-grounding requirement,
+- downgrade the question type and/or difficulty,
+- NEVER fill the missing information using general knowledge.
+
     TARGET CONCEPT:
     {adaptive_plan.get("concept") or "Core concepts from the provided material"}
 
@@ -368,9 +380,20 @@ STRICT GROUNDING:
     1a.If the adaptive target is "misconception", the question MUST primarily
    diagnose the specific MISCONCEPTION rather than merely covering the topic.
 
-    2. Every question MUST follow the specified QUESTION TYPE.
+    2. Every question SHOULD follow the specified QUESTION TYPE only when that
+   question type can be satisfied using explicit information in the source.
 
-    3. Every question MUST satisfy the REQUIRED DIFFICULTY.
+   If the source does not explicitly support the requested question type,
+   DO NOT invent facts, relationships, or comparisons to satisfy it.
+   Instead, use a simpler question type that is fully supported by the source
+   while still testing the TARGET CONCEPT.
+
+    3. Every question SHOULD satisfy the REQUIRED DIFFICULTY when this can be
+   done without introducing unsupported information.
+
+   Source grounding has priority over difficulty. If the requested difficulty
+   would require unsupported reasoning, generate a simpler fully grounded
+   question instead.
 
     4. Do NOT generate unrelated questions from other concepts in the chapter,
     even if those concepts appear prominently in the source material.
@@ -453,10 +476,38 @@ QUESTION NOVELTY RULES:
                         for q in res[key_name]:
                             q_text = q.get("question", "")
                             if q_text and not is_similar_question(q_text, seen):
-                                valid_questions.append(q)
-                                seen.append(q_text)
-                                if len(valid_questions) == target_count:
-                                    break
+                                validation_prompt = QUIZ_GROUNDING_VALIDATOR_PROMPT + f"""
+
+                            STUDY MATERIAL:
+                            {full_text}
+
+                            GENERATED QUESTION:
+                            {json.dumps(q, ensure_ascii=False)}
+                            """
+
+                                try:
+                                    validation_raw = generator.chain.invoke({
+                                        "context": full_text,
+                                        "question": validation_prompt
+                                    })
+
+                                    validation = extract_json(validation_raw)
+
+                                    if validation and validation.get("valid") is True:
+                                        valid_questions.append(q)
+                                        seen.append(q_text)
+
+                                        if len(valid_questions) == target_count:
+                                            break
+                                    else:
+                                        print(
+                                            "Rejected ungrounded quiz question:",
+                                            validation.get("reason", "No validation reason")
+                                            if validation else "Invalid validator response"
+                                        )
+
+                                except Exception as validation_error:
+                                    print("Grounding validation error:", repr(validation_error))
                 except Exception as e:
                     print("Generation loop error:", repr(e))
                 attempts += 1

@@ -122,6 +122,28 @@ Return:
   ]
 }"""
 
+QUIZ_GROUNDING_VALIDATOR_PROMPT = """Validate whether the generated question is fully grounded in the provided study material.
+
+The study material is the ONLY source of truth.
+
+Return ONLY valid JSON:
+{
+  "valid": true,
+  "reason": "string"
+}
+
+Rules:
+1. The question, every option, the correct answer, and the explanation must be
+   supported by explicit information in the study material.
+2. Reject the question if it invents, assumes, generalizes, or extends facts
+   beyond the source.
+3. Reject comparisons unless the source explicitly provides the comparison.
+4. Reject an option if it contradicts or overgeneralizes the source.
+5. If ANY option contains an unsupported factual claim that is presented as
+   possible/correct, return valid=false.
+6. When uncertain, return valid=false.
+"""
+
 QUIZ_SHORT_ANSWER_PROMPT = """Based on the provided context, generate the requested number of short answer questions.
 
 Follow the requested difficulty exactly.
