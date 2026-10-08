@@ -455,35 +455,55 @@ QUESTION NOVELTY RULES:
     
     generator = Generator(json_mode=True)
     try:
-        def generate_and_filter(prompt_template, existing_qs, target_count, key_name):
+        def generate_and_filter(
+            prompt_template,
+            existing_qs,
+            target_count,
+            key_name
+        ):
             valid_questions = []
             seen = list(existing_qs)
             attempts = 0
-            
+
             while len(valid_questions) < target_count and attempts < 3:
                 needed = target_count - len(valid_questions)
+
                 current_instruction = custom_instruction.replace(
-                    f"Generate exactly {count} questions.", 
+                    f"Generate exactly {count} questions.",
                     f"Generate exactly {needed} questions."
                 )
+
                 prompt = prompt_template + current_instruction
-                
+
                 try:
-                    raw = generator.chain.invoke({"context": full_text, "question": prompt})
+                    raw = generator.chain.invoke({
+                        "context": full_text,
+                        "question": prompt
+                    })
+
                     from utils.json_helper import extract_json
+
                     res = extract_json(raw)
+
                     if res and key_name in res:
                         for q in res[key_name]:
                             q_text = q.get("question", "")
-                            if q_text and not is_similar_question(q_text, seen):
-                                validation_prompt = QUIZ_GROUNDING_VALIDATOR_PROMPT + f"""
 
-                            STUDY MATERIAL:
-                            {full_text}
+                            if q_text and not is_similar_question(
+                                q_text,
+                                seen
+                            ):
+                                validation_prompt = (
+                                    QUIZ_GROUNDING_VALIDATOR_PROMPT
+                                    + f"""
 
-                            GENERATED QUESTION:
-                            {json.dumps(q, ensure_ascii=False)}
-                            """
+STUDY MATERIAL:
+{full_text}
+
+GENERATED QUESTION:
+{json.dumps(q, ensure_ascii=False)}
+"""
+                                )
 
                                 try:
                                     validation_raw = generator.chain.invoke({
@@ -491,51 +511,214 @@ QUESTION NOVELTY RULES:
                                         "question": validation_prompt
                                     })
 
-                                    validation = extract_json(validation_raw)
+                                    validation = extract_json(
+                                        validation_raw
+                                    )
+
                                     def normalize_source_text(text):
-                                        return re.sub(r"\s+", " ", (text or "")).strip().lower()
+                                        return re.sub(
+                                            r"\s+",
+                                            " ",
+                                            (text or "")
+                                        ).strip().lower()
 
-                                    source_normalized = normalize_source_text(full_text)
+                                    def evidence_supports_claim(
+                                        claim,
+                                        evidence
+                                    ):
+                                        claim_words = re.findall(
+                                            r"[a-zA-Z]{3,}",
+                                            (claim or "").lower()
+                                        )
 
-                                    evidence_valid = False
-
-                                    if validation and validation.get("valid") is True:
-                                        question_evidence = validation.get("question_evidence", "")
-                                        option_evidence = validation.get("option_evidence", {})
-                                        answer_evidence = validation.get("answer_evidence", "")
-
-                                        evidence_quotes = [question_evidence, answer_evidence]
-
-                                        for option in q.get("options", []):
-                                            option_value = option.get("value")
-                                            evidence_quotes.append(
-                                                option_evidence.get(option_value, "")
-                                            )
-
-                                        normalized_quotes = [
-                                            normalize_source_text(quote)
-                                            for quote in evidence_quotes
-                                            if quote
-                                        ]
-
-                                        evidence_valid = (
-                                            len(normalized_quotes) == len(evidence_quotes)
-                                            and all(
-                                                quote in source_normalized
-                                                for quote in normalized_quotes
+                                        evidence_text = (
+                                            normalize_source_text(
+                                                evidence
                                             )
                                         )
 
-                                    if validation and validation.get("valid") is True and evidence_valid:
+                                        stop_words = {
+                                            "the",
+                                            "and",
+                                            "that",
+                                            "this",
+                                            "these",
+                                            "those",
+                                            "with",
+                                            "from",
+                                            "into",
+                                            "for",
+                                            "are",
+                                            "was",
+                                            "were",
+                                            "been",
+                                            "being",
+                                            "has",
+                                            "have",
+                                            "had",
+                                            "which",
+                                            "what",
+                                            "when",
+                                            "where",
+                                            "while",
+                                            "than",
+                                            "then",
+                                            "their",
+                                            "there",
+                                            "they",
+                                        }
+
+                                        meaningful_words = [
+                                            word
+                                            for word in claim_words
+                                            if word not in stop_words
+                                        ]
+
+                                        if not meaningful_words:
+                                            return False
+
+                                        return all(
+                                            word in evidence_text
+                                            for word in meaningful_words
+                                        )
+
+                                    source_normalized = (
+                                        normalize_source_text(
+                                            full_text
+                                        )
+                                    )
+
+                                    evidence_valid = False
+
+                                    if (
+                                        validation
+                                        and validation.get("valid") is True
+                                    ):
+                                        question_evidence = (
+                                            validation.get(
+                                                "question_evidence",
+                                                ""
+                                            )
+                                        )
+
+                                        option_evidence = (
+                                            validation.get(
+                                                "option_evidence",
+                                                {}
+                                            )
+                                        )
+
+                                        answer_evidence = (
+                                            validation.get(
+                                                "answer_evidence",
+                                                ""
+                                            )
+                                        )
+
+                                        evidence_valid = bool(
+                                            question_evidence
+                                            and answer_evidence
+                                            and isinstance(
+                                                option_evidence,
+                                                dict
+                                            )
+                                        )
+
+                                        if evidence_valid:
+                                            question_quote = (
+                                                normalize_source_text(
+                                                    question_evidence
+                                                )
+                                            )
+
+                                            answer_quote = (
+                                                normalize_source_text(
+                                                    answer_evidence
+                                                )
+                                            )
+
+                                            evidence_valid = (
+                                                question_quote
+                                                in source_normalized
+                                                and answer_quote
+                                                in source_normalized
+                                                and evidence_supports_claim(
+                                                    q.get(
+                                                        "question",
+                                                        ""
+                                                    ),
+                                                    question_evidence
+                                                )
+                                            )
+
+                                        if evidence_valid:
+                                            for option in q.get(
+                                                "options",
+                                                []
+                                            ):
+                                                option_value = option.get(
+                                                    "value",
+                                                    ""
+                                                )
+
+                                                option_label = option.get(
+                                                    "label",
+                                                    ""
+                                                )
+
+                                                option_evidence_text = (
+                                                    option_evidence.get(
+                                                        option_value,
+                                                        ""
+                                                    )
+                                                )
+
+                                                if not option_evidence_text:
+                                                    evidence_valid = False
+                                                    break
+
+                                                normalized_evidence = (
+                                                    normalize_source_text(
+                                                        option_evidence_text
+                                                    )
+                                                )
+
+                                                if (
+                                                    normalized_evidence
+                                                    not in source_normalized
+                                                ):
+                                                    evidence_valid = False
+                                                    break
+
+                                                if not evidence_supports_claim(
+                                                    option_label,
+                                                    option_evidence_text
+                                                ):
+                                                    evidence_valid = False
+                                                    break
+
+                                    if (
+                                        validation
+                                        and validation.get("valid") is True
+                                        and evidence_valid
+                                    ):
                                         valid_questions.append(q)
                                         seen.append(q_text)
 
-                                        if len(valid_questions) == target_count:
+                                        if (
+                                            len(valid_questions)
+                                            == target_count
+                                        ):
                                             break
+
                                     else:
                                         reason = (
-                                            validation.get("reason", "Source evidence validation failed")
-                                            if validation else
+                                            validation.get(
+                                                "reason",
+                                                "Source evidence validation failed"
+                                            )
+                                            if validation
+                                            else
                                             "Invalid validator response"
                                         )
 
@@ -544,31 +727,28 @@ QUESTION NOVELTY RULES:
                                             reason
                                         )
 
-                                    # if validation and validation.get("valid") is True:
-                                    #     valid_questions.append(q)
-                                    #     seen.append(q_text)
-
-                                    #     if len(valid_questions) == target_count:
-                                    #         break
-                                    # else:
-                                    #     print(
-                                    #         "Rejected ungrounded quiz question:",
-                                    #         validation.get("reason", "No validation reason")
-                                    #         if validation else "Invalid validator response"
-                                    #     )
-
                                 except Exception as validation_error:
-                                    print("Grounding validation error:", repr(validation_error))
+                                    print(
+                                        "Grounding validation error:",
+                                        repr(validation_error)
+                                    )
+
                 except Exception as e:
-                    print("Generation loop error:", repr(e))
+                    print(
+                        "Generation loop error:",
+                        repr(e)
+                    )
+
                 attempts += 1
-                
+
             if len(valid_questions) < target_count:
                 raise RuntimeError(
-                    f"Insufficient novel questions generated for {key_name}. "
-                    f"Requested {target_count}, but only {len(valid_questions)} met novelty and adaptive constraints after {attempts} attempts."
+                    f"Insufficient novel questions generated for "
+                    f"{key_name}. Requested {target_count}, but only "
+                    f"{len(valid_questions)} met novelty and adaptive "
+                    f"constraints after {attempts} attempts."
                 )
-                
+
             return {key_name: valid_questions}
 
         mcq = generate_and_filter(QUIZ_MCQ_PROMPT, previous_questions, count, "mcq")
