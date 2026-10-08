@@ -50,7 +50,7 @@ export function StudyChat() {
            <button onClick={() => setMobileMenuOpen(true)} className="p-2 -ml-2 text-[var(--text-secondary)] hover:text-white">
              <Menu size={20} />
            </button>
-           <div className="font-bold">Shadow<span className="text-[var(--accent-purple)]">Byte</span></div>
+           <div className="font-bold">Yukti</div>
            <div className="w-8"></div>
         </div>
 
@@ -90,7 +90,7 @@ export function StudyChat() {
             </div>
 
             {/* Tab Content */}
-            <div className={`flex-1 ${activeTab === 'graph' ? 'p-0 overflow-hidden' : 'overflow-y-auto p-4 smooth-scroll'}`}>
+            <div className={`flex-1 ${activeTab === 'graph' ? 'p-0 overflow-hidden' : 'overflow-y-auto p-4 smooth-scroll yukti-scrollbar'}`}>
               {activeTab === 'notes' && <SmartNotes sessionId={sessionId} />}
               {activeTab === 'quiz' && <QuizPanel sessionId={sessionId} />}
               {activeTab === 'flashcards' && <FlashcardDecks sessionId={sessionId} />}

@@ -110,8 +110,8 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-    background-color: #0a0a0f;
-    color: #f1f0f9;
+    background-color: var(--bg-base);
+    color: var(--text-primary);
   }
   
   h1, h2, h3, h4, h5, h6 {
@@ -187,4 +187,45 @@
 }
 .dark-markdown li {
   margin-bottom: 0.25rem;
+}
+
+
+/* Yukti accessibility + scroll affordance */
+.yukti-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.7) transparent;
+}
+
+.yukti-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+
+.yukti-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.yukti-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.62);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+.yukti-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(165, 180, 252, 0.82);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+:focus-visible {
+  outline: 2px solid #818cf8;
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }

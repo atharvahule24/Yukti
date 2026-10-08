@@ -16,7 +16,7 @@ NextLearningAction,
 } from '../lib/api'
 
 import {
-Ghost,
+BookOpen,
 Flame,
 FileText,
 Trash2,
@@ -136,7 +136,7 @@ return (
 
 <div className="w-12 h-12 bg-[var(--bg-elevated)] border border-[var(--border)] rounded-full flex items-center justify-center">
 
-<Ghost
+<BookOpen
 size={24}
 className="text-[var(--accent-purple)]"
 />
@@ -144,10 +144,7 @@ className="text-[var(--accent-purple)]"
 </div>
 
 <h1 className="text-3xl font-bold tracking-tight">
-Shadow
-<span className="text-[var(--accent-purple)]">
-Byte
-</span>
+Yukti
 </h1>
 
 </div>
@@ -391,7 +388,16 @@ Detected {item.occurrences} times
 {/* Next Learning Action */}
 
 {!nextActionLoading && nextAction && (
-  <div className="bg-[var(--bg-surface)] border border-[var(--accent-purple-border)] rounded-[var(--radius-lg)] p-6 mb-6">
+  <button
+    type="button"
+    onClick={() => {
+      const targetSessionId = sessions[0]?.id
+      if (targetSessionId) navigate(`/chat/${targetSessionId}`)
+    }}
+    disabled={!sessions[0]?.id}
+    className="w-full text-left bg-[var(--bg-surface)] border border-[var(--accent-purple-border)] rounded-[var(--radius-lg)] p-6 mb-6 transition-all hover:border-[var(--accent-purple)] hover:bg-[var(--accent-purple-dim)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-purple)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-base)] disabled:cursor-default"
+    aria-label="Start your next learning step"
+  >
 
     <div className="flex items-center gap-2 mb-4">
 
@@ -438,9 +444,13 @@ Detected {item.occurrences} times
 
       </div>
 
+      <span className="inline-flex items-center justify-center shrink-0 px-4 py-2 rounded-lg bg-[var(--accent-purple)] text-white text-sm font-semibold">
+        Start Review →
+      </span>
+
     </div>
 
-  </div>
+  </button>
 )}
 
 {/* Recent Sessions */}

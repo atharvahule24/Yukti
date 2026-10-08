@@ -455,21 +455,31 @@ className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--ra
 
 {result && (
 <div className="mt-4 p-4 rounded-[var(--radius)] bg-[var(--bg-elevated)] border border-[var(--border)]">
-<div className="flex items-center justify-between gap-3 mb-2">
-<p className="text-sm font-semibold text-[var(--text-primary)]">Score: {result.score}/10</p>
+<div className="mb-4">
+<p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-2">Your Answer</p>
+<div className="rounded-lg bg-[var(--bg-surface)] border border-[var(--border)] p-3 text-sm text-[var(--text-primary)] leading-relaxed whitespace-pre-wrap break-words">{shortAnswers[question.id]}</div>
 </div>
-<p className="text-sm text-[var(--text-secondary)] leading-relaxed">{result.feedback}</p>
+<div className="flex items-center justify-between gap-3 mb-3">
+<div>
+<p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-1">Result</p>
+<p className="text-2xl font-bold text-[var(--accent-purple)]">{result.score}<span className="text-base text-[var(--text-secondary)]">/10</span></p>
+</div>
+</div>
+<div>
+<p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-1">AI Feedback</p>
+<p className="text-sm text-[var(--text-primary)] leading-relaxed">{result.feedback}</p>
+</div>
 {result.study_tip && (
 <div className="mt-3 p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
-<p className="text-xs text-purple-300/80 font-medium mb-1">Study tip</p>
+<p className="text-xs text-purple-200 font-semibold mb-1">Study Tip</p>
 <p className="text-sm text-white/70">{result.study_tip}</p>
 </div>
 )}
 
 {result.learning_path && (
 <div className="mt-3 p-3 rounded-lg bg-blue-500/10 border border-blue-500/20">
-<p className="text-xs text-blue-300 font-medium mb-1">
-Next learning step
+<p className="text-xs text-blue-200 font-semibold mb-1">
+Next Learning Step
 </p>
 
 <p className="text-sm text-white/80">

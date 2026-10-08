@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BASE_URL } from '../lib/api';
 import { setToken } from '../lib/auth';
-import { Ghost, Loader2 } from 'lucide-react';
+import { BookOpen, Loader2 } from 'lucide-react';
 
 export function Auth() {
   const [isLogin, setIsLogin] = useState(true);
@@ -54,10 +54,10 @@ export function Auth() {
       <div className="w-full max-w-md bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-8 relative z-10 shadow-lg">
         <div className="flex flex-col items-center mb-8">
           <div className="w-12 h-12 bg-[var(--bg-elevated)] border border-[var(--border)] rounded-full flex items-center justify-center mb-4">
-            <Ghost size={24} className="text-[var(--accent-purple)]" />
+            <BookOpen size={24} className="text-[var(--accent-purple)]" />
           </div>
           <h1 className="text-2xl font-bold tracking-tight">
-            Shadow<span className="text-[var(--accent-purple)]">Byte</span>
+            Yukti
           </h1>
           <p className="text-[var(--text-secondary)] mt-2">
             {isLogin ? 'Sign in to your account' : 'Create a new account'}
@@ -65,16 +65,17 @@ export function Auth() {
         </div>
 
         {error && (
-          <div className={`p-3 mb-6 rounded-md text-sm ${error.includes('successful') ? 'bg-[var(--accent-purple-dim)] text-[var(--accent-purple)]' : 'bg-[var(--danger-dim)] text-[var(--danger)]'}`}>
+          <div role="alert" aria-live="polite" className={`p-3 mb-6 rounded-md text-sm ${error.includes('successful') ? 'bg-[var(--accent-purple-dim)] text-[var(--accent-purple)]' : 'bg-[var(--danger-dim)] text-[var(--danger)]'}`}>
             {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium mb-1">Username</label>
+            <label htmlFor="username" className="block text-sm font-medium mb-1">Username</label>
             <input
-              type="text"
+              id="username"
+type="text"
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}
@@ -82,9 +83,10 @@ export function Auth() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Password</label>
+            <label htmlFor="password" className="block text-sm font-medium mb-1">Password</label>
             <input
-              type="password"
+              id="password"
+type="password"
               required
               value={password}
               onChange={(e) => setPassword(e.target.value)}
