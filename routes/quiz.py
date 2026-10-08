@@ -330,9 +330,20 @@ def generate_quiz(session_id):
 
     IMPORTANT: This is an ADAPTIVE quiz.
 
-    The adaptive learning plan is the primary instruction for question selection.
-    The source material is used to ensure factual grounding, but do NOT simply
-    generate generic questions from the chapter.
+The adaptive learning plan determines WHAT concept to assess and WHY.
+The provided source material is the ONLY factual authority for HOW the
+question, options, answer, and explanation are constructed.
+
+STRICT GROUNDING:
+- Every factual claim MUST be directly supported by the provided source material.
+- Do NOT use outside knowledge.
+- Do NOT infer or extend facts beyond what the source explicitly states.
+- Do NOT create comparisons unless the source explicitly provides the comparison.
+- Do NOT invent relationships between concepts merely to satisfy the requested difficulty.
+- If the requested question type or difficulty cannot be satisfied without
+  introducing unsupported information, generate a simpler valid question
+  about the target concept instead.
+- The adaptive plan NEVER overrides source-grounding.
 
     TARGET CONCEPT:
     {adaptive_plan.get("concept") or "Core concepts from the provided material"}
@@ -351,7 +362,8 @@ def generate_quiz(session_id):
 
     Rules for question generation:
 
-    1. Every question MUST primarily assess the TARGET CONCEPT.
+    1. Every question MUST primarily assess the TARGET CONCEPT AND MUST be
+   directly answerable from explicit information in the source material.
 
     1a.If the adaptive target is "misconception", the question MUST primarily
    diagnose the specific MISCONCEPTION rather than merely covering the topic.
@@ -366,19 +378,22 @@ def generate_quiz(session_id):
     5. If the adaptive target is "misconception", the question MUST test the
     learner's identified misconception.
 
-    6. If the adaptive target is "advanced_application", the question must
-    require transfer, deeper reasoning, or application in a new situation.
+    6. If the adaptive target is "advanced_application", require application
+   only when the application can be constructed entirely from information
+   explicitly provided in the source material. Do not introduce outside facts.
 
-    7. If the adaptive target is "practice", the question must require
-    application of the target concept.
+    7. If the adaptive target is "practice", require application only when the
+    application can be constructed entirely from information explicitly
+    provided in the source material.
 
-    8. If the adaptive target is "review", the question should reinforce
-    understanding of the target concept.
+    8. If the adaptive target is "review", reinforce the target concept using
+    only information explicitly stated in the source material.
 
-    9. If the adaptive target is "retention", test retrieval of the target concept.
+    9. If the adaptive target is "retention", test retrieval using only
+    information explicitly stated in the source material.
 
     10. If the adaptive target is "confidence", use a clear conceptual question
-        that allows the learner to demonstrate understanding.
+        that is directly answerable from the source material.
 
     11. Do not merely copy sentences or questions from the source material.
 

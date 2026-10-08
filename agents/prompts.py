@@ -91,30 +91,24 @@ Return ONLY valid JSON, no other text:
   ]
 }"""
 
-QUIZ_MCQ_PROMPT = """Based on the provided context, generate the requested number of multiple choice questions.
+QUIZ_MCQ_PROMPT = """Generate multiple-choice questions using ONLY the provided study material.
 
-The caller will specify the required difficulty.
-Follow that difficulty exactly.
+STRICT SOURCE-GROUNDING RULES:
+1. The provided context is the sole source of truth. Do not use outside knowledge.
+2. Every question, correct answer, distractor, and explanation must be directly supported by an explicit statement in the context.
+3. Do not invent, assume, generalize, or reinterpret facts that are not explicitly stated.
+4. Do not create an option that contradicts an explicit statement in the context.
+5. When comparing two concepts, use distinctions explicitly stated in the context.
+6. Prefer clear factual statements from the source over combining multiple statements into a new inference.
+7. The explanation must justify the answer using information explicitly present in the context.
+8. If the context does not contain enough information to create a valid question, do not invent information; choose another fact from the context.
+9. Before returning each question, internally verify that the correct option is directly supported by the context and every distractor is either contradicted by or unsupported by the context.
+10. Return ONLY valid JSON.
 
-Difficulty rules:
-- easy = direct recall, definition, identification
-- medium = explanation, comparison, or straightforward application
-- hard = reasoning, application, analysis, or multi-step thinking
+Generate exactly 5 multiple choice questions.
+Vary difficulty: 2 easy, 2 medium, 1 hard.
 
-For hard questions, NEVER generate a simple definition or identification question.
-
-Every question MUST include:
-- question
-- options
-- answer
-- difficulty
-- concept
-- explanation
-
-The "difficulty" field MUST exactly match the requested difficulty.
-The "concept" field MUST be a specific non-empty concept being tested.
-
-Return ONLY valid JSON, no other text:
+Return:
 {
   "mcq": [
     {
@@ -122,8 +116,8 @@ Return ONLY valid JSON, no other text:
       "options": ["string", "string", "string", "string"],
       "answer": 0,
       "difficulty": "easy or medium or hard",
-      "concept": "short concept name being tested",
-      "explanation": "string explaining correct answer and why distractors are wrong"
+      "concept": "string",
+      "explanation": "Explain why the correct answer is supported by the provided context and why the distractors are incorrect or unsupported."
     }
   ]
 }"""
