@@ -492,19 +492,70 @@ QUESTION NOVELTY RULES:
                                     })
 
                                     validation = extract_json(validation_raw)
+                                    def normalize_source_text(text):
+                                        return re.sub(r"\s+", " ", (text or "")).strip().lower()
+
+                                    source_normalized = normalize_source_text(full_text)
+
+                                    evidence_valid = False
 
                                     if validation and validation.get("valid") is True:
+                                        question_evidence = validation.get("question_evidence", "")
+                                        option_evidence = validation.get("option_evidence", {})
+                                        answer_evidence = validation.get("answer_evidence", "")
+
+                                        evidence_quotes = [question_evidence, answer_evidence]
+
+                                        for option in q.get("options", []):
+                                            option_value = option.get("value")
+                                            evidence_quotes.append(
+                                                option_evidence.get(option_value, "")
+                                            )
+
+                                        normalized_quotes = [
+                                            normalize_source_text(quote)
+                                            for quote in evidence_quotes
+                                            if quote
+                                        ]
+
+                                        evidence_valid = (
+                                            len(normalized_quotes) == len(evidence_quotes)
+                                            and all(
+                                                quote in source_normalized
+                                                for quote in normalized_quotes
+                                            )
+                                        )
+
+                                    if validation and validation.get("valid") is True and evidence_valid:
                                         valid_questions.append(q)
                                         seen.append(q_text)
 
                                         if len(valid_questions) == target_count:
                                             break
                                     else:
+                                        reason = (
+                                            validation.get("reason", "Source evidence validation failed")
+                                            if validation else
+                                            "Invalid validator response"
+                                        )
+
                                         print(
                                             "Rejected ungrounded quiz question:",
-                                            validation.get("reason", "No validation reason")
-                                            if validation else "Invalid validator response"
+                                            reason
                                         )
+
+                                    # if validation and validation.get("valid") is True:
+                                    #     valid_questions.append(q)
+                                    #     seen.append(q_text)
+
+                                    #     if len(valid_questions) == target_count:
+                                    #         break
+                                    # else:
+                                    #     print(
+                                    #         "Rejected ungrounded quiz question:",
+                                    #         validation.get("reason", "No validation reason")
+                                    #         if validation else "Invalid validator response"
+                                    #     )
 
                                 except Exception as validation_error:
                                     print("Grounding validation error:", repr(validation_error))

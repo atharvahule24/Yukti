@@ -122,26 +122,55 @@ Return:
   ]
 }"""
 
-QUIZ_GROUNDING_VALIDATOR_PROMPT = """Validate whether the generated question is fully grounded in the provided study material.
+QUIZ_GROUNDING_VALIDATOR_PROMPT = """Validate whether the generated quiz question is fully grounded in the provided study material.
 
 The study material is the ONLY source of truth.
 
 Return ONLY valid JSON:
 {
   "valid": true,
-  "reason": "string"
+  "reason": "string",
+  "question_evidence": "exact quote from source supporting the question",
+  "option_evidence": {
+    "A": "exact quote from source supporting option A",
+    "B": "exact quote from source supporting option B",
+    "C": "exact quote from source supporting option C",
+    "D": "exact quote from source supporting option D"
+  },
+  "answer_evidence": "exact quote from source supporting the correct answer"
 }
 
-Rules:
-1. The question, every option, the correct answer, and the explanation must be
-   supported by explicit information in the study material.
-2. Reject the question if it invents, assumes, generalizes, or extends facts
-   beyond the source.
-3. Reject comparisons unless the source explicitly provides the comparison.
-4. Reject an option if it contradicts or overgeneralizes the source.
-5. If ANY option contains an unsupported factual claim that is presented as
-   possible/correct, return valid=false.
-6. When uncertain, return valid=false.
+STRICT RULES:
+
+1. Every factual claim in the question MUST be supported by the study material.
+
+2. EVERY option MUST be supported by explicit information in the study material.
+
+3. For EVERY option, provide an exact quote copied from the study material that supports that option.
+
+4. The evidence quote must contain enough information to support the COMPLETE factual claim of that option.
+
+5. Do NOT use general knowledge to justify an option.
+
+6. Do NOT infer, extend, compare, generalize, or combine facts unless the study material explicitly supports that relationship.
+
+7. If even ONE option cannot be supported by an explicit source quote, return:
+   "valid": false
+
+8. If the question asks for a comparison, the source must explicitly provide enough information to make that comparison.
+
+9. If an option contains multiple factual claims, the evidence must support ALL of them.
+
+10. If the source does not contain evidence for a claim, do NOT manufacture evidence.
+
+11. When uncertain, return valid=false.
+
+12. The evidence quotes must be copied from the study material, not paraphrased.
+
+13. The correct answer and its explanation must also be supported by the study material.
+
+IMPORTANT:
+A question is valid ONLY when the question, ALL options, correct answer, and explanation are fully supported by explicit source evidence.
 """
 
 QUIZ_SHORT_ANSWER_PROMPT = """Based on the provided context, generate the requested number of short answer questions.
