@@ -140,7 +140,7 @@ setTimeout(() => {
 }
 
   return (
-    <div className="w-full max-w-2xl mx-auto rounded-[var(--radius-lg)] bg-[var(--bg-surface)] border border-[var(--border)] overflow-hidden">
+    <div className="w-full max-w-4xl mx-auto rounded-[var(--radius-lg)] bg-[var(--bg-surface)] border border-[var(--border)] overflow-hidden">
       
       {/* Tabs */}
       <div className="flex border-b border-[var(--border)]">
