@@ -298,7 +298,12 @@ className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--ra
 </button>
 
 {result && (
-<div className="mt-4 p-4 rounded-[var(--radius)] bg-[var(--bg-elevated)] border border-[var(--border)]">
+<div
+  role="status"
+  aria-live="polite"
+  aria-atomic="true"
+  className="mt-4 p-4 rounded-[var(--radius)] bg-[var(--bg-elevated)] border border-[var(--border)]"
+>
 <p className="text-sm font-semibold text-[var(--text-primary)] mb-2">
 Score: {result.score}/10
 </p>
@@ -396,7 +401,13 @@ className={btnClass}
 )}
 
 {answered && (
-<div className={`mt-6 p-5 rounded-[var(--radius)] flex flex-col gap-4 text-sm border ${isCorrect ? 'bg-[var(--success-dim)] border-[var(--success)]' : 'bg-[var(--danger-dim)] border-[var(--danger)]'}`}>
+
+<div
+  role="status"
+  aria-live="polite"
+  aria-atomic="true"
+  className={`mt-6 p-5 rounded-[var(--radius)] flex flex-col gap-4 text-sm border ${isCorrect ? 'bg-[var(--success-dim)] border-[var(--success)]' : 'bg-[var(--danger-dim)] border-[var(--danger)]'}`}
+>
 <div className="flex items-start gap-3">
 {isCorrect ? <CheckCircle2 size={24} className="shrink-0 text-[var(--success)]" /> : <XCircle size={24} className="shrink-0 text-[var(--danger)]" />}
 <div>

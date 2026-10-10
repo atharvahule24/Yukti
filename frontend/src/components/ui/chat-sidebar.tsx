@@ -56,7 +56,7 @@ export function ChatSidebar({ activeSessionId }: { activeSessionId?: string }) {
         </button>
       </div>
       
-      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+      <div className="flex-1 overflow-y-auto yukti-scrollbar p-2 space-y-1">
         {loading ? (
           <div className="flex justify-center p-4"><Loader2 className="animate-spin text-[var(--text-secondary)]" size={20} /></div>
         ) : sessions.length === 0 ? (

@@ -1,12 +1,14 @@
 import os
 import uuid
 import celery_app
+import tempfile
 from celery import Task
 from processing.chunker import Chunker
 from processing.embedder import Embedder
 from retrieval.vector_store import VectorStore
 from routes.store import session_store
 from db import supabase
+
 
 class ProcessUploadTask(Task):
     def process_upload(self, session_id, filepath, title, original_filename, is_youtube=False):
@@ -26,7 +28,15 @@ class ProcessUploadTask(Task):
                 
                 # filepath is actually the storage_path in Supabase now
                 storage_path = filepath
-                local_tmp = f"/tmp/{uuid.uuid4()}.pdf"
+
+
+
+                # Inside process_upload(), replace the hardcoded /tmp path:
+                local_tmp = os.path.join(
+                    tempfile.gettempdir(),
+                    f"{uuid.uuid4()}.pdf"
+                )
+
                 
                 # Download from Supabase Storage
                 file_bytes = supabase.storage.from_("uploads").download(storage_path)
@@ -63,12 +73,16 @@ class ProcessUploadTask(Task):
                     del doc
                     continue
                     
+
                 for chunk in doc_chunks:
+                    # PostgreSQL text columns cannot store NULL characters.
+                    chunk.page_content = chunk.page_content.replace("\x00", "")
                     chunk.metadata["session_id"] = session_id
                     full_text_parts.append(chunk.page_content)
-                    
+
                 chunk_count += len(doc_chunks)
                 vector_store.add(embedder.model, doc_chunks)
+
                 
                 # Explicitly release temporary objects; Python refcount instantly reclaims them
                 del doc

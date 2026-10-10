@@ -232,7 +232,14 @@ function CopyButton({ text }: { text: string }) {
 
 // ── Main Component ─────────────────────────────────────────────────────────────
 export function ChatInterface({ sessionId }: { sessionId: string }) {
-  const { messages, isLoading, currentMode, setCurrentMode, sendMessage } = useChat()
+const {
+  messages,
+  isLoading,
+  currentMode,
+  setCurrentMode,
+  sendMessage,
+  loadHistory,
+} = useChat()
   const [input, setInput] = useState('')
   const [intervention, setIntervention] = useState<{
   concept: string
@@ -275,6 +282,11 @@ const [interventionQuestion, setInterventionQuestion] = useState('')
     setAwaitingInterventionAnswer(true)
   }
 }, [messages, isLoading, intervention])
+
+useEffect(() => {
+  if (!sessionId) return
+  void loadHistory(sessionId)
+}, [sessionId, loadHistory])
 
   useEffect(() => {
 const handleAsk = (e: Event) => {
@@ -376,7 +388,7 @@ const handleSend = async () => {
       </div>
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto px-5 pt-6 pb-28 flex flex-col bg-[#141414]">
+      <div className="flex-1 overflow-y-auto yukti-scrollbar px-5 pt-6 pb-28 flex flex-col bg-[#141414]">
         {messages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center px-4">
             <div className="w-16 h-16 rounded-full bg-[#231d36] border border-[#3b345c] flex items-center justify-center mb-4">

@@ -2,6 +2,7 @@ import os
 from datetime import datetime, timezone
 from typing import Generator
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import HumanMessage, AIMessage
 from langchain_groq import ChatGroq
 from retrieval.vector_store import VectorStore
 from processing.embedder import Embedder
@@ -84,13 +85,17 @@ Retrieved study material:
 {context}
 """
 
+        history_messages = [
+            HumanMessage(content=item["content"])
+            if item["role"] == "user"
+            else AIMessage(content=item["content"])
+            for item in history
+            if item["role"] in {"user", "assistant"}
+        ]
+
         prompt = ChatPromptTemplate.from_messages([
             ("system", rag_system_prompt),
-            *[
-                (item["role"], item["content"])
-                for item in history
-                if item["role"] in {"user", "assistant"}
-            ],
+            *history_messages,
             ("user", "{message}")
         ])
 

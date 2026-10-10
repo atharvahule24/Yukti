@@ -1,3 +1,4 @@
+import { getChatHistory } from '../lib/api'
 import { useState, useCallback } from 'react'
 import { toast } from 'sonner'
 import { streamChat } from '../lib/api'
@@ -17,6 +18,22 @@ export function useChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [currentMode, setCurrentMode] = useState<'socratic' | 'feynman' | 'simple' | 'exam'>('socratic')
+
+  const loadHistory = useCallback(async (sessionId: string) => {
+  try {
+    const result = await getChatHistory(sessionId)
+
+    setMessages(
+      result.messages.map((message) => ({
+        ...message,
+        streaming: false,
+      }))
+    )
+  } catch (error) {
+    console.error('Failed to load chat history:', error)
+    toast.error('Could not load previous chat messages.')
+  }
+}, [])
 
   const sendMessage = useCallback((text: string, sessionId: string, mode: 'socratic' | 'feynman' | 'simple' | 'exam') => {
     if (!text.trim()) return
@@ -71,11 +88,12 @@ export function useChat() {
   }, [])
 
   return {
-    messages,
-    isLoading,
-    currentMode,
-    setCurrentMode,
-    sendMessage,
-    setMessages
-  }
+  messages,
+  isLoading,
+  currentMode,
+  setCurrentMode,
+  sendMessage,
+  setMessages,
+  loadHistory,
+}
 }
