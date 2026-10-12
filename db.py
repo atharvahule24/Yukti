@@ -539,6 +539,18 @@ def get_user_id_by_token(token: str) -> int | None:
 def delete_auth_token(token: str):
     supabase.table("auth_tokens").delete().eq("token", token).execute()
 
+def revoke_all_user_tokens(user_id: int):
+    supabase.table("auth_tokens").delete().eq("user_id", user_id).execute()
+
+def update_user_password(user_id: int, password_hash: str):
+    supabase.table("users").update({
+        "password_hash": password_hash
+    }).eq("id", user_id).execute()
+
+def get_user_by_email(email: str) -> dict | None:
+    res = supabase.table("users").select("*").eq("username", email).limit(1).execute()
+    return res.data[0] if res.data else None
+
 def save_learner_profile(
     session_id: str,
     learning_style: str = "adaptive",

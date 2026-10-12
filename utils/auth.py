@@ -9,8 +9,13 @@ def require_auth(f):
         auth_header = request.headers.get("Authorization")
         if auth_header and auth_header.startswith("Bearer "):
             token = auth_header.split(" ")[1]
-        else:
+        elif request.cookies.get("auth_token"):
+            token = request.cookies.get("auth_token")
+        elif request.path.endswith("/chat") and request.method == "GET":
+            # Browser EventSource cannot set custom headers; allow token parameter strictly for SSE chat stream
             token = request.args.get("token")
+        else:
+            token = None
             
         if not token:
             return jsonify({"error": "unauthorized", "message": "Missing or invalid token"}), 401

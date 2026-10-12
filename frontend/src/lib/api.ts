@@ -92,6 +92,7 @@ export interface NotesResponse {
 }
 
 export interface Citation {
+  source_id?: number;
   text: string;
   page?: number | string | null;
   source?: string;
@@ -238,7 +239,10 @@ export function streamChat(
   }
 
   eventSource.addEventListener('citations', (event) => {
-    console.log('SSE CITATIONS:', event)
+    console.log(
+  'SSE CITATIONS DATA:',
+  (event as MessageEvent).data
+)
 
     try {
       onCitations?.(JSON.parse((event as MessageEvent).data))
@@ -550,5 +554,89 @@ export async function getVideoRecommendation(
 
   const response = await apiFetch(url)
 
+  return handleResponse(response)
+}
+
+export async function sendOtp(
+  target: string,
+  type: 'email' | 'phone'
+): Promise<{ success: boolean; message: string; retry_after?: number; expires_in?: number }> {
+  const response = await fetch(`${BASE_URL}/auth/otp/send`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target, type }),
+  })
+  return handleResponse(response)
+}
+
+export async function verifyOtp(
+  target: string,
+  type: 'email' | 'phone',
+  otp: string
+): Promise<{ success: boolean; token: string; user: { id: number; username: string } }> {
+  const response = await fetch(`${BASE_URL}/auth/otp/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target, type, otp }),
+  })
+  return handleResponse(response)
+}
+
+export async function requestPasswordReset(
+  email: string
+): Promise<{ success: boolean; message: string; retry_after?: number }> {
+  const response = await fetch(`${BASE_URL}/auth/password-reset/request`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  })
+  return handleResponse(response)
+}
+
+export async function verifyPasswordResetOtp(
+  email: string,
+  otp: string
+): Promise<{ success: boolean; message: string; reset_token: string }> {
+  const response = await fetch(`${BASE_URL}/auth/password-reset/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, otp }),
+  })
+  return handleResponse(response)
+}
+
+export async function confirmPasswordReset(
+  reset_token: string,
+  new_password: string,
+  confirm_password: string
+): Promise<{ success: boolean; message: string }> {
+  const response = await fetch(`${BASE_URL}/auth/password-reset/confirm`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ reset_token, new_password, confirm_password }),
+  })
+  return handleResponse(response)
+}
+
+export async function requestUsernameRecovery(
+  email: string
+): Promise<{ success: boolean; message: string; retry_after?: number }> {
+  const response = await fetch(`${BASE_URL}/auth/username-recovery/request`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  })
+  return handleResponse(response)
+}
+
+export async function verifyUsernameRecoveryOtp(
+  email: string,
+  otp: string
+): Promise<{ success: boolean; username: string; message: string }> {
+  const response = await fetch(`${BASE_URL}/auth/username-recovery/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, otp }),
+  })
   return handleResponse(response)
 }
