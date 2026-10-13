@@ -27,129 +27,160 @@ class KnowledgeGraphSchema(BaseModel):
     nodes: List[Node] = Field(description="List of key concept nodes")
     edges: List[Edge] = Field(description="List of relationships between concept nodes")
 
-def extract_knowledge_graph(chunks, file_path="knowledge_graph.json"):
+def extract_knowledge_graph(content, file_path="knowledge_graph.json"):
+    """
+    Extract educational knowledge graph in a single logical LLM pass.
+    Accepts a list of document chunks or a raw text string.
+    Produces a coherent hierarchical mind map with clean node/edge validation.
+    """
     parser = JsonOutputParser(pydantic_object=KnowledgeGraphSchema)
 
     prompt = PromptTemplate(
-    template="""You are an expert educational graph extractor.
+        template="""You are an expert educational knowledge graph extractor.
 
-Given the following educational text, extract the key learning concepts
-and the meaningful relationships between them.
+Given the following educational text, extract a coherent, hierarchical mind map of key learning concepts
+and the meaningful relationships between them in a single comprehensive graph.
 
-Organize concepts from broader concepts to more specific concepts when
-the text supports such a structure. Do not invent concepts or
-relationships that are not supported by the text.
+ORGANIZATION & HIERARCHY RULES:
+1. Identify exactly 1 central root concept representing the overarching subject of the text.
+2. Identify 3 to 6 major sub-topics branching directly from the root concept (using "includes" or "defines").
+3. Connect sub-topics to specific details, prerequisites ("requires"), or applications ("applied_in", "part_of").
+4. Extract between 8 and 18 meaningful concept nodes in total with their connecting edges.
+5. Do NOT invent concepts or relationships that are not directly supported by the text.
 
-Extract up to 12 meaningful nodes and their corresponding edges from
-this text chunk.
-
-Be concise. Ensure output format is strictly JSON following the schema.
+Be concise. Output format must be strictly valid JSON following the schema.
 {format_instructions}
 
-Use only these relationship labels:
-
-- requires: target concept is a prerequisite for source concept
-- includes: source contains target as a sub-concept
+Use ONLY these relationship labels:
+- includes: source concept contains target as a major sub-topic/branch
+- defines: source concept defines or introduces target concept
+- requires: target concept is a prerequisite needed to understand source concept
 - related_to: concepts are conceptually related
-- applied_in: source is used in target/application
-- defines: source defines target
-- part_of: source is a component of target
+- applied_in: source concept is applied or used in target context
+- part_of: source concept is a component or part of target
 
 For "requires", always set:
 source = the concept that needs the prerequisite
 target = the prerequisite concept
 
-Example:
-source: "quadratic equations"
-target: "algebraic equations"
-label: "requires"
-
-For prerequisite relationships, prefer "requires".
-Do not invent relationship labels.
+Node IDs must be unique lowercase snake_case identifiers (e.g. "photosynthesis", "light_reactions").
+Node labels must be clean display names (e.g. "Photosynthesis", "Light Reactions").
+Do not create self-referential edges (where source == target).
 
 Text:
 {text}
 """,
-    input_variables=["text"],
-    partial_variables={
-        "format_instructions": parser.get_format_instructions()
-    },
-)
-    
+        input_variables=["text"],
+        partial_variables={
+            "format_instructions": parser.get_format_instructions()
+        },
+    )
+
     groq_api_key = os.environ.get("GROQ_API_KEY")
     if not groq_api_key:
         print("Warning: GROQ_API_KEY not found. Skipping graph extraction.")
-        return
-        
+        return {"nodes": [], "edges": [], "links": []}
+
+    # Normalize input text
+    if isinstance(content, str):
+        full_text = content
+    elif isinstance(content, list):
+        text_parts = []
+        for item in content:
+            if hasattr(item, "page_content"):
+                text_parts.append(item.page_content)
+            elif isinstance(item, dict) and "page_content" in item:
+                text_parts.append(item["page_content"])
+            else:
+                text_parts.append(str(item))
+        full_text = "\n\n".join(text_parts)
+    else:
+        full_text = str(content)
+
+    if not full_text.strip():
+        return {"nodes": [], "edges": [], "links": []}
+
+    # Bounded text window for single pass (up to 5000 characters)
+    if len(full_text) > 5000:
+        mid = len(full_text) // 2
+        sampled_text = f"{full_text[:2000]}\n\n{full_text[mid - 500:mid + 500]}\n\n{full_text[-2000:]}"
+    else:
+        sampled_text = full_text
+
     model = ChatGroq(
         model_name="openai/gpt-oss-20b",
         temperature=0.1,
-        max_tokens=1024,
+        max_tokens=2048,
         api_key=groq_api_key,
     )
-    
+
     chain = prompt | model | parser
-    
+
     try:
-        def process_chunk(chunk):
-            return chain.invoke({"text": chunk.page_content[:1200]})
+        # Single logical LLM pass
+        raw_graph = chain.invoke({"text": sampled_text}) or {}
 
         all_nodes = {}
-        all_edges = []
-        worker_count = min(8, max(1, len(chunks)))
-        with ThreadPoolExecutor(max_workers=worker_count) as pool:
-            futures = [pool.submit(process_chunk, chunk) for chunk in chunks]
-            for future in as_completed(futures):
-                try:
-                    partial_graph = future.result()
-                except Exception as exc:
-                    print(f"Chunk graph extraction failed: {exc}")
-                    continue
-                for node in partial_graph.get("nodes", []):
-                    node_id = str(node.get("id", "")).strip()
-                    label = str(node.get("label", "")).strip()
+        for node in raw_graph.get("nodes", []):
+            raw_id = str(node.get("id", "")).strip().lower().replace(" ", "_")
+            label = str(node.get("label", "")).strip()
+            subject = str(node.get("subject", "General")).strip() or "General"
 
-                    if not node_id or not label:
-                        continue
+            if not raw_id or not label:
+                continue
 
-                    node["id"] = node_id
-                    node["label"] = label
-                    all_nodes[node_id] = node
-                all_edges.extend(partial_graph.get("edges", []))
+            all_nodes[raw_id] = {
+                "id": raw_id,
+                "label": label,
+                "subject": subject
+            }
 
-                seen_edges = set()
-                unique_edges = []
+        allowed_labels = {"requires", "includes", "related_to", "applied_in", "defines", "part_of"}
+        seen_edges = set()
+        unique_edges = []
 
-                for edge in all_edges:
-                    source = str(edge.get("source", "")).strip()
-                    target = str(edge.get("target", "")).strip()
-                    label = str(edge.get("label", "")).strip()
+        for edge in raw_graph.get("edges", []):
+            source = str(edge.get("source", "")).strip().lower().replace(" ", "_")
+            target = str(edge.get("target", "")).strip().lower().replace(" ", "_")
+            label = str(edge.get("label", "related_to")).strip().lower()
 
-                    if not source or not target or not label:
-                        continue
+            if label not in allowed_labels:
+                label = "related_to"
 
-                    if source not in all_nodes or target not in all_nodes:
-                        continue
+            if not source or not target or source == target:
+                continue
 
-                    key = (source, target, label)
+            if source not in all_nodes or target not in all_nodes:
+                continue
 
-                    if key not in seen_edges:
-                        seen_edges.add(key)
-                        unique_edges.append({
-                            "source": source,
-                            "target": target,
-                            "label": label,
-                        })
+            key = (source, target, label)
+            if key not in seen_edges:
+                seen_edges.add(key)
+                unique_edges.append({
+                    "source": source,
+                    "target": target,
+                    "label": label,
+                })
 
-        new_graph = {"nodes": list(all_nodes.values()), "edges": unique_edges}
-                
-        # Merge with existing
-        merge_graph(file_path, new_graph)
-        print("Successfully extracted and merged knowledge graph.")
+        new_graph = {
+            "nodes": list(all_nodes.values()),
+            "edges": unique_edges,
+            "links": unique_edges
+        }
+
+        # Safe merge with existing registry file
+        if file_path:
+            try:
+                merge_graph(file_path, new_graph)
+            except Exception as me:
+                print(f"Non-critical: could not merge knowledge graph to file: {me}")
+
+        print(f"Successfully extracted single-pass knowledge graph: {len(all_nodes)} nodes, {len(unique_edges)} edges.")
         return new_graph
+
     except Exception as e:
-        print(f"Error extracting knowledge graph: {e}")
-        return {"nodes": [], "edges": []}
+        print(f"Error in single-pass knowledge graph extraction: {e}")
+        return {"nodes": [], "edges": [], "links": []}
 
 def merge_graph(file_path, new_graph):
     # Load existing

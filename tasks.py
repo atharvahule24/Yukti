@@ -126,12 +126,15 @@ def process_upload(self, session_id, filepath, title, original_filename, is_yout
 def generate_graph_task(self, session_id):
     try:
         from processing.graph_extractor import extract_knowledge_graph
-        from processing.chunker import Chunker
-        from langchain_core.documents import Document
 
         session = session_store.get(session_id)
         if not session:
             raise ValueError(f"Session {session_id} not found.")
+
+        # Avoid redundant regeneration if graph is already present
+        existing_graph = session.get("graph")
+        if existing_graph and existing_graph.get("nodes") and len(existing_graph.get("nodes", [])) > 0:
+            return existing_graph
 
         self.update_state(state="PROGRESS", meta={"stage": "Generating Knowledge Graph..."})
         full_text = session.get("full_text", "")
@@ -144,11 +147,13 @@ def generate_graph_task(self, session_id):
         else:
             sampled_text = full_text
 
-        chunks = Chunker().split([Document(page_content=sampled_text)])[:8]
-        graph_data = extract_knowledge_graph(chunks) or {"nodes": [], "edges": []}
+        # Single logical LLM pass directly on sampled context
+        graph_data = extract_knowledge_graph(sampled_text) or {"nodes": [], "edges": [], "links": []}
 
-        if "edges" in graph_data:
+        if "edges" in graph_data and "links" not in graph_data:
             graph_data["links"] = graph_data.pop("edges")
+        elif "links" in graph_data and "edges" not in graph_data:
+            graph_data["edges"] = graph_data.get("links", [])
             
         session["graph"] = graph_data
         session_store[session_id] = session

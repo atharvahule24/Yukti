@@ -73,6 +73,28 @@ def is_similar_question(question, previous_questions, threshold=0.72):
 
     return False
 
+
+def is_rate_limit_error(exc: Exception) -> bool:
+    """Identify upstream HTTP 429 / RateLimitError exceptions safely."""
+    if exc is None:
+        return False
+    status_code = getattr(exc, "status_code", None) or getattr(exc, "http_status", None)
+    if status_code == 429:
+        return True
+    exc_type = type(exc).__name__.lower()
+    if "ratelimit" in exc_type:
+        return True
+    exc_msg = str(exc).lower()
+    return (
+        "rate limit" in exc_msg
+        or "ratelimit" in exc_msg
+        or "429" in exc_msg
+        or "rate_limit_exceeded" in exc_msg
+        or "tokens per minute" in exc_msg
+        or "tokens per day" in exc_msg
+    )
+
+
 quiz_bp = Blueprint('quiz', __name__)
 
 @quiz_bp.route('/quiz/<session_id>', methods=['GET'])
@@ -138,7 +160,7 @@ def generate_quiz(session_id):
                     previous_questions.append(question)
 
     previous_questions_text = "\n".join(
-        f"- {question}" for question in previous_questions
+        f"- {question}" for question in previous_questions[-20:]
     )
 
     valid, error = validate_extracted_text(full_text, max_length=None)
@@ -297,31 +319,6 @@ def generate_quiz(session_id):
     now understands the concept correctly.
     """
 
-        previous_questions = []
-
-        for old_quiz in question_history[-5:]:
-            for q in old_quiz.get("mcq", []):
-                if q.get("question"):
-                    previous_questions.append(q["question"])
-
-            for q in old_quiz.get("short_answer", []):
-                if q.get("question"):
-                    previous_questions.append(q["question"])
-
-        if previous_quiz:
-            for q in previous_quiz.get("mcq", []):
-                if q.get("question"):
-                    previous_questions.append(q["question"])
-
-            for q in previous_quiz.get("short_answer", []):
-                if q.get("question"):
-                    previous_questions.append(q["question"])
-
-        previous_questions_text = "\n".join(
-            f"- {question}"
-            for question in previous_questions[-20:]
-        )
-
     if adaptive_plan.get("concept"):
         concept_requirement = f'Every generated question MUST use:\n    concept = "{adaptive_plan["concept"]}"'
     else:
@@ -464,14 +461,32 @@ QUESTION NOVELTY RULES:
             valid_questions = []
             seen = list(existing_qs)
             attempts = 0
+            batch_size = 2
+            max_attempts = max(8, (target_count * 2) + 4)
 
-            while len(valid_questions) < target_count and attempts < 3:
-                needed = target_count - len(valid_questions)
+            while len(valid_questions) < target_count and attempts < max_attempts:
+                remaining_count = target_count - len(valid_questions)
+                current_batch_size = min(batch_size, remaining_count)
+
+                # Dynamically provide all accumulated seen questions so LLM avoids generating duplicates
+                current_seen_text = "\n".join(f"- {q}" for q in seen[-20:]) if seen else "None"
 
                 current_instruction = custom_instruction.replace(
                     f"Generate exactly {count} questions.",
-                    f"Generate exactly {needed} questions."
+                    f"Generate exactly {current_batch_size} questions."
                 )
+
+                if "PREVIOUSLY ASKED QUESTIONS:" in current_instruction:
+                    parts = current_instruction.split("PREVIOUSLY ASKED QUESTIONS:", 1)
+                    if "QUESTION NOVELTY RULES:" in parts[1]:
+                        _, after_rules = parts[1].split("QUESTION NOVELTY RULES:", 1)
+                        current_instruction = (
+                            parts[0]
+                            + "PREVIOUSLY ASKED QUESTIONS:\n"
+                            + current_seen_text
+                            + "\n\nQUESTION NOVELTY RULES:"
+                            + after_rules
+                        )
 
                 prompt = prompt_template + current_instruction
 
@@ -516,11 +531,61 @@ GENERATED QUESTION:
                                     )
 
                                     def normalize_source_text(text):
+                                        text = (text or "").strip().strip("\"'“”`")
+                                        text = re.sub(r"[^\w\s]", " ", text)
                                         return re.sub(
                                             r"\s+",
                                             " ",
-                                            (text or "")
+                                            text
                                         ).strip().lower()
+
+                                    def quote_grounded_in_source(
+                                        evidence_raw,
+                                        source_normalized
+                                    ):
+                                        if not evidence_raw:
+                                            return False
+                                        norm_full = normalize_source_text(
+                                            evidence_raw
+                                        )
+                                        if norm_full and norm_full in source_normalized:
+                                            return True
+                                        chunks = [
+                                            c.strip()
+                                            for c in re.split(
+                                                r"[.\n;]+",
+                                                evidence_raw
+                                            )
+                                            if c.strip()
+                                        ]
+                                        valid_chunks = [
+                                            c for c in chunks
+                                            if len(c.split()) >= 3
+                                        ]
+                                        if valid_chunks:
+                                            all_in_source = True
+                                            for chunk in valid_chunks:
+                                                norm_chunk = normalize_source_text(
+                                                    chunk
+                                                )
+                                                if norm_chunk not in source_normalized:
+                                                    all_in_source = False
+                                                    break
+                                            if all_in_source:
+                                                return True
+                                        words = norm_full.split()
+                                        if len(words) >= 4:
+                                            windows = [
+                                                " ".join(words[i:i+4])
+                                                for i in range(len(words) - 3)
+                                            ]
+                                            matched_windows = sum(
+                                                1 for w in windows
+                                                if w in source_normalized
+                                            )
+                                            if matched_windows / len(windows) >= 0.7:
+                                                return True
+                                        return False
 
                                     def evidence_supports_claim(
                                         claim,
@@ -566,6 +631,44 @@ GENERATED QUESTION:
                                             "their",
                                             "there",
                                             "they",
+                                            "how",
+                                            "why",
+                                            "who",
+                                            "whom",
+                                            "whose",
+                                            "does",
+                                            "did",
+                                            "can",
+                                            "could",
+                                            "would",
+                                            "should",
+                                            "will",
+                                            "take",
+                                            "place",
+                                            "takes",
+                                            "following",
+                                            "statement",
+                                            "statements",
+                                            "correct",
+                                            "true",
+                                            "false",
+                                            "best",
+                                            "describes",
+                                            "according",
+                                            "passage",
+                                            "text",
+                                            "stated",
+                                            "mentioned",
+                                            "about",
+                                            "above",
+                                            "below",
+                                            "each",
+                                            "every",
+                                            "some",
+                                            "such",
+                                            "also",
+                                            "most",
+                                            "more",
                                         }
 
                                         meaningful_words = [
@@ -575,11 +678,40 @@ GENERATED QUESTION:
                                         ]
 
                                         if not meaningful_words:
-                                            return False
+                                            return True
 
-                                        return all(
-                                            word in evidence_text
+                                        matched = [
+                                            word
                                             for word in meaningful_words
+                                            if word in evidence_text
+                                        ]
+
+                                        concept_str = (
+                                            (q.get("concept") or "").lower()
+                                            if isinstance(q, dict)
+                                            else ""
+                                        )
+                                        concept_words = [
+                                            w
+                                            for w in re.findall(
+                                                r"[a-zA-Z]{3,}",
+                                                concept_str
+                                            )
+                                            if w not in stop_words
+                                        ]
+                                        if concept_words and any(
+                                            cw in evidence_text
+                                            for cw in concept_words
+                                        ):
+                                            return True
+
+                                        if len(meaningful_words) <= 2:
+                                            return len(matched) >= 1
+
+                                        return (
+                                            len(matched) / len(meaningful_words)
+                                            >= 0.35
+                                            or len(matched) >= 2
                                         )
 
                                     source_normalized = (
@@ -607,6 +739,8 @@ GENERATED QUESTION:
                                                 {}
                                             )
                                         )
+                                        if not isinstance(option_evidence, dict):
+                                            option_evidence = {}
 
                                         answer_evidence = (
                                             validation.get(
@@ -618,74 +752,71 @@ GENERATED QUESTION:
                                         evidence_valid = bool(
                                             question_evidence
                                             and answer_evidence
-                                            and isinstance(
-                                                option_evidence,
-                                                dict
-                                            )
                                         )
 
                                         if evidence_valid:
-                                            question_quote = (
-                                                normalize_source_text(
-                                                    question_evidence
-                                                )
+                                            q_in_src = quote_grounded_in_source(
+                                                question_evidence,
+                                                source_normalized
                                             )
-
-                                            answer_quote = (
-                                                normalize_source_text(
-                                                    answer_evidence
-                                                )
+                                            a_in_src = quote_grounded_in_source(
+                                                answer_evidence,
+                                                source_normalized
+                                            )
+                                            sup_claim = evidence_supports_claim(
+                                                q.get(
+                                                    "question",
+                                                    ""
+                                                ),
+                                                question_evidence
                                             )
 
                                             evidence_valid = (
-                                                question_quote
-                                                in source_normalized
-                                                and answer_quote
-                                                in source_normalized
-                                                and evidence_supports_claim(
-                                                    q.get(
-                                                        "question",
-                                                        ""
-                                                    ),
-                                                    question_evidence
-                                                )
+                                                q_in_src
+                                                and a_in_src
+                                                and sup_claim
                                             )
 
-                                        if evidence_valid:
-                                            for option in q.get(
-                                                "options",
-                                                []
+                                        if evidence_valid and key_name == "mcq" and option_evidence:
+                                            for idx, option in enumerate(
+                                                q.get(
+                                                    "options",
+                                                    []
+                                                )
                                             ):
-                                                option_value = option.get(
-                                                    "value",
-                                                    ""
-                                                )
-
-                                                option_label = option.get(
-                                                    "label",
-                                                    ""
-                                                )
+                                                if isinstance(option, dict):
+                                                    option_value = (
+                                                        option.get("value")
+                                                        or chr(65 + idx)
+                                                    )
+                                                    option_label = (
+                                                        option.get("label")
+                                                        or option.get("text")
+                                                        or str(option)
+                                                    )
+                                                else:
+                                                    option_value = chr(
+                                                        65 + idx
+                                                    )
+                                                    option_label = str(option)
 
                                                 option_evidence_text = (
                                                     option_evidence.get(
                                                         option_value,
                                                         ""
                                                     )
-                                                )
-
-                                                if not option_evidence_text:
-                                                    evidence_valid = False
-                                                    break
-
-                                                normalized_evidence = (
-                                                    normalize_source_text(
-                                                        option_evidence_text
+                                                    or option_evidence.get(
+                                                        str(idx),
+                                                        ""
                                                     )
                                                 )
 
-                                                if (
-                                                    normalized_evidence
-                                                    not in source_normalized
+                                                if not option_evidence_text:
+                                                    continue
+
+                                                if not quote_grounded_in_source(
+                                                    option_evidence_text,
+                                                    source_normalized
                                                 ):
                                                     evidence_valid = False
                                                     break
@@ -726,14 +857,24 @@ GENERATED QUESTION:
                                             "Rejected ungrounded quiz question:",
                                             reason
                                         )
+                                        # Track in seen to avoid repeated generation/validation of rejected candidates
+                                        seen.append(q_text)
 
                                 except Exception as validation_error:
+                                    if is_rate_limit_error(validation_error):
+                                        raise RuntimeError(
+                                            "Quiz generation is temporarily unavailable because the AI provider's rate limit has been reached. Please try again later."
+                                        )
                                     print(
                                         "Grounding validation error:",
                                         repr(validation_error)
                                     )
 
                 except Exception as e:
+                    if is_rate_limit_error(e):
+                        raise RuntimeError(
+                            "Quiz generation is temporarily unavailable because the AI provider's rate limit has been reached. Please try again later."
+                        )
                     print(
                         "Generation loop error:",
                         repr(e)
@@ -757,54 +898,21 @@ GENERATED QUESTION:
         mcq_questions = [q.get("question", "") for q in mcq.get("mcq", [])]
         sa = generate_and_filter(QUIZ_SHORT_ANSWER_PROMPT, previous_questions + mcq_questions, count, "short_answer")
 
-        previous_questions = []
-
-        for old_quiz in question_history:
-            for q in old_quiz.get("mcq", []):
-                if q.get("question"):
-                    previous_questions.append(q["question"])
-
-            for q in old_quiz.get("short_answer", []):
-                if q.get("question"):
-                    previous_questions.append(q["question"])
-
-        if previous_quiz:
-            for q in previous_quiz.get("mcq", []):
-                if q.get("question"):
-                    previous_questions.append(q["question"])
-
-            for q in previous_quiz.get("short_answer", []):
-                if q.get("question"):
-                    previous_questions.append(q["question"])
-
         adaptive_concept = adaptive_plan.get("concept")
 
         for i, m in enumerate(mcq.get("mcq", [])):
             m["id"] = f"mcq_{i}"
 
-            concept = adaptive_concept or m.get("concept")
-            if not concept:
-                raise ValueError("Generated MCQ is missing concept.")
-
-            m["concept"] = get_canonical_concept(str(concept))
+            concept = adaptive_concept or m.get("concept") or "General"
+            m["concept"] = get_canonical_concept(str(concept)) or "general"
             m["difficulty"] = difficulty
-
-            if not m["concept"]:
-                raise ValueError("Generated MCQ has invalid concept.")
-
 
         for i, s in enumerate(sa.get("short_answer", [])):
             s["id"] = f"sa_{i}"
 
-            concept = adaptive_concept or s.get("concept")
-            if not concept:
-                raise ValueError("Generated short-answer question is missing concept.")
-
-            s["concept"] = get_canonical_concept(str(concept))
+            concept = adaptive_concept or s.get("concept") or "General"
+            s["concept"] = get_canonical_concept(str(concept)) or "general"
             s["difficulty"] = difficulty
-
-            if not s["concept"]:
-                raise ValueError("Generated short-answer question has invalid concept.")
             
         quiz = {
             "mcq": mcq.get("mcq", []),
@@ -1094,7 +1202,7 @@ def grade_answer():
         grading["score"] = score
 
         # Detect misconception for incorrect answers.
-        print("🔥 SCORE DEBUG:", score, "IS_REASSESSMENT:", is_reassessment)
+        print("SCORE DEBUG:", score, "IS_REASSESSMENT:", is_reassessment)
         if score < 7:
             misconception_result = detect_misconception(
                 question=question,
@@ -1103,7 +1211,7 @@ def grade_answer():
                 concept=concept,
             )
 
-            print("🔎 MISCONCEPTION RESULT:", misconception_result)
+            print("MISCONCEPTION RESULT:", misconception_result)
 
             grading["misconception"] = misconception_result
 
