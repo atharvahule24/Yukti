@@ -533,7 +533,7 @@ class OTPProvider:
                 msg["From"] = smtp_user
                 msg["To"] = email
 
-                with smtplib.SMTP(smtp_host, port) as server:
+                with smtplib.SMTP(smtp_host, port, timeout=10) as server:
                     server.starttls()
                     server.login(smtp_user, smtp_pass)
                     server.send_message(msg)
