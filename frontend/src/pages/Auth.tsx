@@ -123,7 +123,15 @@ export function Auth() {
       setSuccessMsg(res.message || `Verification code sent to your ${otpType}.`);
       startCooldown(setCooldown, res.retry_after || 60);
     } catch (err: any) {
-      setError(err.message || 'Failed to send verification code.');
+      if (err?.ambiguous_delivery) {
+        // Delivery could not be confirmed (e.g. timeout reading provider response),
+        // but OTP is preserved in the backend store. Allow entering code without claiming delivery was confirmed.
+        setOtpSent(true);
+        setError(err.message || 'Delivery could not be confirmed. If you received a code, enter it below.');
+        startCooldown(setCooldown, err.retry_after || 60);
+      } else {
+        setError(err.message || 'Failed to send verification code.');
+      }
     } finally {
       setLoading(false);
     }
@@ -161,7 +169,13 @@ export function Auth() {
       setSuccessMsg(res.message || 'Verification code sent to your registered email.');
       startCooldown(setFpCooldown, res.retry_after || 60);
     } catch (err: any) {
-      setError(err.message || 'Failed to request password reset code.');
+      if (err?.ambiguous_delivery) {
+        setFpStep('verify');
+        setError(err.message || 'Delivery could not be confirmed. If you received a code, enter it below.');
+        startCooldown(setFpCooldown, err.retry_after || 60);
+      } else {
+        setError(err.message || 'Failed to request password reset code.');
+      }
     } finally {
       setLoading(false);
     }
@@ -225,7 +239,13 @@ export function Auth() {
       setSuccessMsg(res.message || 'Verification code sent to your registered email.');
       startCooldown(setFuCooldown, res.retry_after || 60);
     } catch (err: any) {
-      setError(err.message || 'Failed to request username recovery code.');
+      if (err?.ambiguous_delivery) {
+        setFuStep('verify');
+        setError(err.message || 'Delivery could not be confirmed. If you received a code, enter it below.');
+        startCooldown(setFuCooldown, err.retry_after || 60);
+      } else {
+        setError(err.message || 'Failed to request username recovery code.');
+      }
     } finally {
       setLoading(false);
     }

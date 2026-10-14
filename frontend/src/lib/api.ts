@@ -101,13 +101,26 @@ export interface Citation {
 async function handleResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let message = response.statusText;
+    let ambiguous_delivery: boolean | undefined = undefined;
+    let retry_after: number | undefined = undefined;
     try {
       const errorData = await response.json();
       message = errorData.message || errorData.error || message;
+      if (typeof errorData.ambiguous_delivery === 'boolean') {
+        ambiguous_delivery = errorData.ambiguous_delivery;
+      }
+      if (typeof errorData.retry_after === 'number') {
+        retry_after = errorData.retry_after;
+      }
     } catch {
       // Ignore json parse error
     }
-    throw { error: 'api_error', message };
+    throw {
+      error: 'api_error',
+      message,
+      ...(ambiguous_delivery !== undefined ? { ambiguous_delivery } : {}),
+      ...(retry_after !== undefined ? { retry_after } : {}),
+    };
   }
   return response.json();
 }
@@ -560,7 +573,7 @@ export async function getVideoRecommendation(
 export async function sendOtp(
   target: string,
   type: 'email' | 'phone'
-): Promise<{ success: boolean; message: string; retry_after?: number; expires_in?: number }> {
+): Promise<{ success: boolean; message: string; retry_after?: number; expires_in?: number; ambiguous_delivery?: boolean }> {
   const response = await fetch(`${BASE_URL}/auth/otp/send`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

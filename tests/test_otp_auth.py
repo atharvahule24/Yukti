@@ -204,6 +204,56 @@ class TestOTPServiceAndRoutes(unittest.TestCase):
         self.assertEqual(data["error"], "otp_send_failed")
 
     @patch("services.otp_service.is_production", return_value=False)
+    @patch("services.otp_service.OTPProvider.send_email")
+    def test_route_send_otp_ambiguous_delivery_returns_metadata_and_preserves_otp(self, mock_send_email, mock_prod):
+        """Verifies that route /api/auth/otp/send returns HTTP 400 with ambiguous_delivery: True on read timeout."""
+        from services.otp_service import EmailDispatchResult, _otp_store
+        mock_send_email.return_value = EmailDispatchResult(
+            False,
+            "Failed to send verification email. Delivery could not be confirmed; please check your inbox or try again.",
+            is_ambiguous=True
+        )
+
+        with patch.dict(os.environ, {"RESEND_API_KEY": "re_mock_test_key", "ALLOW_MOCK_OTP": "false"}):
+            resp = self.client.post(
+                "/api/auth/otp/send",
+                json={"target": "ambiguous_learner@yukti.org", "type": "email"}
+            )
+            self.assertEqual(resp.status_code, 400)
+            data = resp.get_json()
+            self.assertEqual(data["error"], "otp_send_failed")
+            self.assertTrue(data.get("ambiguous_delivery"))
+            self.assertIn("could not be confirmed", data["message"])
+            # OTP must remain in store
+            record = _otp_store.get("ambiguous_learner@yukti.org", purpose="login")
+            self.assertIsNotNone(record)
+
+    @patch("services.otp_service.is_production", return_value=False)
+    @patch("services.otp_service.OTPProvider.send_email")
+    def test_route_send_otp_definitive_failure_does_not_return_ambiguous_flag(self, mock_send_email, mock_prod):
+        """Verifies that route /api/auth/otp/send returns HTTP 400 without ambiguous_delivery on definitive rejection."""
+        from services.otp_service import EmailDispatchResult, _otp_store
+        mock_send_email.return_value = EmailDispatchResult(
+            False,
+            "Failed to send verification email. Please try again later.",
+            is_ambiguous=False
+        )
+
+        with patch.dict(os.environ, {"RESEND_API_KEY": "re_mock_test_key", "ALLOW_MOCK_OTP": "false"}):
+            resp = self.client.post(
+                "/api/auth/otp/send",
+                json={"target": "rejected_learner@yukti.org", "type": "email"}
+            )
+            self.assertEqual(resp.status_code, 400)
+            data = resp.get_json()
+            self.assertEqual(data["error"], "otp_send_failed")
+            self.assertFalse(data.get("ambiguous_delivery", False))
+            self.assertEqual(data["message"], "Failed to send verification email. Please try again later.")
+            # OTP must be purged from store
+            record = _otp_store.get("rejected_learner@yukti.org", purpose="login")
+            self.assertIsNone(record)
+
+    @patch("services.otp_service.is_production", return_value=False)
     @patch("services.otp_service.OTPProvider._is_mock_allowed", return_value=True)
     @patch("routes.auth.get_user_by_username")
     @patch("routes.auth.save_user")
