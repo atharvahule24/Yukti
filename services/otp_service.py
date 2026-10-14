@@ -494,6 +494,62 @@ class OTPStore:
 _otp_store = OTPStore()
 
 
+class EmailDispatchResult(tuple):
+    """
+    Two-tuple (success: bool, message: str) carrying an optional is_ambiguous flag.
+    Subclasses tuple to guarantee full backward compatibility with any (success, msg) unpacking.
+    """
+    def __new__(cls, success: bool, message: str, is_ambiguous: bool = False):
+        return super().__new__(cls, (success, message))
+
+    def __init__(self, success: bool, message: str, is_ambiguous: bool = False):
+        self.is_ambiguous = is_ambiguous
+
+
+def _is_pre_connection_failure(exc: Exception) -> bool:
+    """
+    Determine whether an exception definitively occurred before the HTTP request body
+    could be transmitted to the remote server.
+
+    Returns True for:
+      - DNS resolution failures (socket.gaierror)
+      - Connection refused (ConnectionRefusedError, errno.ECONNREFUSED)
+      - Network/Host unreachable (errno.ENETUNREACH, errno.EHOSTUNREACH)
+      - Address not available (errno.EADDRNOTAVAIL)
+
+    Returns False for:
+      - Socket read timeouts (TimeoutError, socket.timeout)
+      - Connection resets or TLS teardowns after connect
+      - Any ambiguous post-connect transport errors
+
+    LIMITATION NOTE:
+    With blocking urllib.request, it is impossible to guarantee with 100% certainty
+    whether the remote provider accepted or processed request bytes if a socket error
+    or timeout occurs mid-transfer. However, DNS resolution and connection-refused errors
+    are guaranteed to have occurred before any bytes were sent on the wire.
+    """
+    import socket
+    import errno
+
+    reason = getattr(exc, "reason", exc)
+
+    if isinstance(reason, socket.gaierror):
+        return True
+    if isinstance(reason, ConnectionRefusedError):
+        return True
+    if isinstance(reason, OSError):
+        err_no = getattr(reason, "errno", None)
+        if err_no in (
+            errno.ECONNREFUSED,
+            errno.ENETUNREACH,
+            errno.EHOSTUNREACH,
+            errno.EADDRNOTAVAIL,
+        ):
+            return True
+
+    return False
+
+
 class OTPProvider:
     """Pluggable provider for Email and SMS OTP dispatch with secure production fallbacks."""
 
@@ -551,17 +607,34 @@ class OTPProvider:
                     method="POST"
                 )
                 with urllib.request.urlopen(req, timeout=10) as resp:
-                    if resp.status in (200, 201):
-                        logger.info(f"Dispatched {purpose} email OTP to {mask_target(email)} via Resend HTTPS API.")
-                        return True, "Email sent successfully."
-                    logger.error(f"Resend API returned unexpected status code: {resp.status}")
-                    return False, "Failed to send verification email. Please try again later."
+                    if 200 <= resp.status < 300:
+                        logger.info(f"Dispatched {purpose} email OTP to {mask_target(email)} via Resend HTTPS API (HTTP {resp.status}).")
+                        return EmailDispatchResult(True, "Email sent successfully.")
+                    logger.error(f"Resend API returned non-2xx status code {resp.status} for {mask_target(email)}.")
+                    return EmailDispatchResult(False, "Failed to send verification email. Please try again later.", is_ambiguous=False)
             except urllib.error.HTTPError as e:
-                logger.error(f"Resend API HTTP error: {e.code} {e.reason}")
-                return False, "Failed to send verification email. Please try again later."
+                logger.error(f"Resend API HTTP error for {mask_target(email)}: HTTP {e.code} ({e.reason})")
+                return EmailDispatchResult(False, "Failed to send verification email. Please try again later.", is_ambiguous=False)
+            except (urllib.error.URLError, TimeoutError) as e:
+                is_pre_conn = _is_pre_connection_failure(e)
+                err_detail = getattr(e, "reason", str(e))
+                if is_pre_conn:
+                    logger.error(f"Connection failure before Resend dispatch for {mask_target(email)}: {type(e).__name__} ({err_detail})")
+                    return EmailDispatchResult(
+                        False,
+                        "Failed to send verification email. Please try again later.",
+                        is_ambiguous=False
+                    )
+                else:
+                    logger.error(f"Network error during Resend dispatch for {mask_target(email)}: {type(e).__name__} ({err_detail})")
+                    return EmailDispatchResult(
+                        False,
+                        "Failed to send verification email. Delivery could not be confirmed; please check your inbox or try again.",
+                        is_ambiguous=True
+                    )
             except Exception as e:
-                logger.error(f"Failed to send email OTP via Resend: {type(e).__name__}")
-                return False, "Failed to send verification email. Please try again later."
+                logger.error(f"Unexpected error during Resend dispatch for {mask_target(email)}: {type(e).__name__} ({e})")
+                return EmailDispatchResult(False, "Failed to send verification email. Please try again later.", is_ambiguous=True)
 
         # 2. Secondary Provider: SMTP (used only when RESEND_API_KEY is absent)
         if smtp_host and smtp_user and smtp_pass:
@@ -579,20 +652,20 @@ class OTPProvider:
                     server.login(smtp_user, smtp_pass)
                     server.send_message(msg)
                 logger.info(f"Dispatched {purpose} email OTP to {mask_target(email)} via SMTP provider.")
-                return True, "Email sent successfully."
+                return EmailDispatchResult(True, "Email sent successfully.")
             except Exception as e:
-                logger.error(f"Failed to send email OTP via SMTP: {e}")
-                return False, "Failed to send verification email. Please try again later."
+                logger.error(f"Failed to send email OTP via SMTP for {mask_target(email)}: {type(e).__name__}")
+                return EmailDispatchResult(False, "Failed to send verification email. Please try again later.", is_ambiguous=False)
 
         if not OTPProvider._is_mock_allowed():
             logger.error("Email provider not configured and mock OTP is disallowed in production.")
-            return False, "Email service is not configured. Please contact support."
+            return EmailDispatchResult(False, "Email service is not configured. Please contact support.", is_ambiguous=False)
 
         # Dev / Testing / Mock fallback - never log plaintext OTP at INFO in production
         logger.info(f"[OTP DEV/MOCK] Dispatched {purpose} email OTP to {mask_target(email)}")
         if os.getenv("FLASK_ENV") == "development":
             logger.debug(f"[DEV DEBUG ONLY] Plaintext OTP: {otp}")
-        return True, "Email dispatched via development/mock provider."
+        return EmailDispatchResult(True, "Email dispatched via development/mock provider.")
 
     @staticmethod
     def send_sms(phone: str, otp: str) -> Tuple[bool, str]:
@@ -612,7 +685,7 @@ class OTPProvider:
                 logger.info(f"Dispatched SMS OTP to {mask_target(phone)} via Twilio provider.")
                 return True, "SMS sent successfully."
             except Exception as e:
-                logger.error(f"Failed to send SMS OTP via Twilio: {e}")
+                logger.error(f"Failed to send SMS OTP via Twilio for {mask_target(phone)}: {type(e).__name__}")
                 return False, "Failed to send verification SMS. Please try again later."
 
         if not OTPProvider._is_mock_allowed():
@@ -676,16 +749,21 @@ class OTPService:
 
         # 4. Dispatch via provider
         if target_type == "email":
-            success, msg = OTPProvider.send_email(normalized, otp, purpose=purpose)
+            dispatch_res = OTPProvider.send_email(normalized, otp, purpose=purpose)
         else:
-            success, msg = OTPProvider.send_sms(normalized, otp)
+            dispatch_res = OTPProvider.send_sms(normalized, otp)
+
+        success, msg = dispatch_res[0], dispatch_res[1]
+        is_ambiguous = getattr(dispatch_res, "is_ambiguous", False)
 
         if not success:
-            try:
-                _otp_store.delete(normalized, purpose=purpose)
-            except Exception:
-                pass
-            return False, msg, {}
+            if not is_ambiguous:
+                try:
+                    _otp_store.delete(normalized, purpose=purpose)
+                except Exception:
+                    pass
+            meta = {"ambiguous_delivery": True} if is_ambiguous else {}
+            return False, msg, meta
 
         meta = {"expires_in": 300, "target": mask_target(normalized), "provider_status": msg, "purpose": purpose}
         # In automated test mode ONLY, expose code for test fixtures

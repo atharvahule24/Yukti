@@ -542,6 +542,192 @@ class TestOTPServiceAndRoutes(unittest.TestCase):
             self.assertTrue(success)
             mock_smtp.assert_called_once_with("smtp.custom.org", 587, timeout=10)
 
+    @patch("urllib.request.urlopen")
+    def test_resend_send_email_202_accepted(self, mock_urlopen):
+        """Verifies that non-200 2xx status (HTTP 202 Accepted) is accepted as success."""
+        mock_resp = MagicMock()
+        mock_resp.status = 202
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        env_vars = {
+            "RESEND_API_KEY": "re_mock_test_key_12345",
+            "RESEND_FROM": "Yukti Auth <auth@testdomain.com>",
+            "ALLOW_MOCK_OTP": "false",
+            "FLASK_ENV": "production"
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            success, msg = OTPProvider.send_email("learner@example.com", "654321", purpose="login")
+            self.assertTrue(success)
+            self.assertEqual(msg, "Email sent successfully.")
+
+    @patch("urllib.request.urlopen")
+    def test_resend_timeout_ambiguous_preserves_otp_in_store(self, mock_urlopen):
+        """Verifies that network timeout marks delivery ambiguous and preserves OTP in store for verification."""
+        mock_urlopen.side_effect = TimeoutError("The read operation timed out")
+
+        env_vars = {
+            "RESEND_API_KEY": "re_mock_key",
+            "ALLOW_MOCK_OTP": "false",
+            "FLASK_ENV": "production"
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            with patch("services.otp_service._otp_store.delete") as mock_delete:
+                with patch("services.otp_service._otp_store.can_resend", return_value=(True, 0)):
+                    with patch("services.otp_service._otp_store.save"):
+                        success, msg, meta = OTPService.send_otp("learner@example.com", "email", purpose="login")
+                        # 1. Delivery is not falsely claimed to be confirmed
+                        self.assertFalse(success)
+                        # 2. Ambiguity metadata is recorded
+                        self.assertTrue(meta.get("ambiguous_delivery"))
+                        # 3. OTP is NOT deleted from store
+                        mock_delete.assert_not_called()
+
+    @patch("urllib.request.urlopen")
+    def test_resend_provider_rejection_deletes_otp_from_store(self, mock_urlopen):
+        """Verifies that explicit HTTP 403 provider rejection purges OTP from store."""
+        import urllib.error
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            "https://api.resend.com/emails", 403, "Forbidden", {}, None
+        )
+
+        env_vars = {
+            "RESEND_API_KEY": "re_mock_key",
+            "ALLOW_MOCK_OTP": "false",
+            "FLASK_ENV": "production"
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            with patch("services.otp_service._otp_store.delete") as mock_delete:
+                with patch("services.otp_service._otp_store.can_resend", return_value=(True, 0)):
+                    with patch("services.otp_service._otp_store.save"):
+                        success, msg, meta = OTPService.send_otp("learner@example.com", "email", purpose="login")
+                        self.assertFalse(success)
+                        self.assertFalse(meta.get("ambiguous_delivery", False))
+                        # Definitive provider rejection MUST purge OTP from store
+                        mock_delete.assert_called_once_with("learner@example.com", purpose="login")
+
+    @patch("urllib.request.urlopen")
+    def test_resend_url_error_preserves_otp_in_store(self, mock_urlopen):
+        """Verifies that socket URLError disconnect marks delivery ambiguous and preserves OTP."""
+        import urllib.error
+        mock_urlopen.side_effect = urllib.error.URLError("Connection reset by peer")
+
+        env_vars = {
+            "RESEND_API_KEY": "re_mock_key",
+            "ALLOW_MOCK_OTP": "false",
+            "FLASK_ENV": "production"
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            with patch("services.otp_service._otp_store.delete") as mock_delete:
+                with patch("services.otp_service._otp_store.can_resend", return_value=(True, 0)):
+                    with patch("services.otp_service._otp_store.save"):
+                        success, msg, meta = OTPService.send_otp("learner@example.com", "email", purpose="login")
+                        self.assertFalse(success)
+                        self.assertTrue(meta.get("ambiguous_delivery"))
+                        mock_delete.assert_not_called()
+
+    @patch("urllib.request.urlopen")
+    def test_resend_ambiguous_outcome_allows_successful_subsequent_verification(self, mock_urlopen):
+        """Verifies that if delivery times out but email reached user, the received code verifies successfully."""
+        mock_urlopen.side_effect = TimeoutError("The read operation timed out")
+
+        target = "timeoutlearner@example.com"
+        env_vars = {
+            "RESEND_API_KEY": "re_mock_key",
+            "ALLOW_MOCK_OTP": "false",
+            "TESTING": "true"
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            # 1. Dispatch encounters read timeout
+            success, msg, meta = OTPService.send_otp(target, "email", purpose="login")
+            self.assertFalse(success)
+            self.assertTrue(meta.get("ambiguous_delivery"))
+            from services.otp_service import _otp_store
+            record = _otp_store.get(target, purpose="login")
+            self.assertIsNotNone(record)
+            code = record["otp"]
+
+            # 2. User enters the delivered code; verification must succeed!
+            ok, v_msg = OTPService.verify_otp(target, "email", code, purpose="login")
+            self.assertTrue(ok)
+            self.assertEqual(v_msg, "Code verified successfully.")
+
+    @patch("urllib.request.urlopen")
+    def test_resend_dns_failure_purges_otp_from_store(self, mock_urlopen):
+        """Verifies that pre-connection DNS resolution failure is classified as non-ambiguous and purges OTP."""
+        import socket
+        import urllib.error
+        mock_urlopen.side_effect = urllib.error.URLError(socket.gaierror(-2, "Name or service not known"))
+
+        env_vars = {
+            "RESEND_API_KEY": "re_mock_key",
+            "ALLOW_MOCK_OTP": "false",
+            "FLASK_ENV": "production"
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            with patch("services.otp_service._otp_store.delete") as mock_delete:
+                with patch("services.otp_service._otp_store.can_resend", return_value=(True, 0)):
+                    with patch("services.otp_service._otp_store.save"):
+                        success, msg, meta = OTPService.send_otp("dnsfail@example.com", "email", purpose="login")
+                        self.assertFalse(success)
+                        self.assertFalse(meta.get("ambiguous_delivery", False))
+                        mock_delete.assert_called_once_with("dnsfail@example.com", purpose="login")
+
+    @patch("urllib.request.urlopen")
+    def test_resend_connection_refused_purges_otp_from_store(self, mock_urlopen):
+        """Verifies that pre-connection TCP connection refused is classified as non-ambiguous and purges OTP."""
+        import urllib.error
+        mock_urlopen.side_effect = urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+
+        env_vars = {
+            "RESEND_API_KEY": "re_mock_key",
+            "ALLOW_MOCK_OTP": "false",
+            "FLASK_ENV": "production"
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            with patch("services.otp_service._otp_store.delete") as mock_delete:
+                with patch("services.otp_service._otp_store.can_resend", return_value=(True, 0)):
+                    with patch("services.otp_service._otp_store.save"):
+                        success, msg, meta = OTPService.send_otp("connrefused@example.com", "email", purpose="login")
+                        self.assertFalse(success)
+                        self.assertFalse(meta.get("ambiguous_delivery", False))
+                        mock_delete.assert_called_once_with("connrefused@example.com", purpose="login")
+
+    @patch("services.otp_service.OTPProvider.send_sms")
+    def test_sms_provider_success_return_behavior(self, mock_send_sms):
+        """Verifies standard 2-tuple return compatibility and persistence when SMS provider succeeds."""
+        mock_send_sms.return_value = (True, "SMS sent successfully.")
+
+        env_vars = {
+            "ALLOW_MOCK_OTP": "false",
+            "FLASK_ENV": "production"
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            with patch("services.otp_service._otp_store.delete") as mock_delete:
+                with patch("services.otp_service._otp_store.can_resend", return_value=(True, 0)):
+                    with patch("services.otp_service._otp_store.save"):
+                        success, msg, meta = OTPService.send_otp("+1234567890", "phone", purpose="login")
+                        self.assertTrue(success)
+                        self.assertEqual(meta.get("provider_status"), "SMS sent successfully.")
+                        mock_delete.assert_not_called()
+
+    @patch("services.otp_service.OTPProvider.send_sms")
+    def test_sms_provider_failure_purges_otp_from_store(self, mock_send_sms):
+        """Verifies standard 2-tuple return compatibility and OTP cleanup when SMS provider fails."""
+        mock_send_sms.return_value = (False, "SMS service is not configured.")
+
+        env_vars = {
+            "ALLOW_MOCK_OTP": "false",
+            "FLASK_ENV": "production"
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            with patch("services.otp_service._otp_store.delete") as mock_delete:
+                with patch("services.otp_service._otp_store.can_resend", return_value=(True, 0)):
+                    with patch("services.otp_service._otp_store.save"):
+                        success, msg, meta = OTPService.send_otp("+1234567890", "phone", purpose="login")
+                        self.assertFalse(success)
+                        self.assertFalse(meta.get("ambiguous_delivery", False))
+                        mock_delete.assert_called_once_with("+1234567890", purpose="login")
+
 
 if __name__ == "__main__":
     unittest.main()
