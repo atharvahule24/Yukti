@@ -1,3 +1,4 @@
+import os
 from utils.auth import require_session_owner, require_auth, get_current_user_id
 from flask import Blueprint, jsonify
 from routes.store import session_store
@@ -34,7 +35,11 @@ def delete_session(session_id):
 
 @sessions_bp.route('/health', methods=['GET'])
 def health():
-    return jsonify({"status": "ok", "version": "1.0.0"})
+    return jsonify({
+        "status": "ok",
+        "version": "1.0.0",
+        "resend_configured": bool(os.getenv("RESEND_API_KEY"))
+    })
 
 @sessions_bp.route('/progress/<session_id>', methods=['GET'])
 @require_session_owner
