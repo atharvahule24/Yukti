@@ -421,6 +421,127 @@ class TestOTPServiceAndRoutes(unittest.TestCase):
                     self.assertEqual(len(failures), 4)
                     self.assertIn("expired", failures[0][1].lower())
 
+    # --- 7. Resend HTTPS Provider Focused Tests ---
+    @patch("urllib.request.urlopen")
+    def test_resend_send_email_success(self, mock_urlopen):
+        """Verifies successful email dispatch via Resend HTTPS API with required headers and payload."""
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        env_vars = {
+            "RESEND_API_KEY": "re_mock_test_key_12345",
+            "RESEND_FROM": "Yukti Auth <auth@testdomain.com>",
+            "ALLOW_MOCK_OTP": "false",
+            "FLASK_ENV": "production"
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            success, msg = OTPProvider.send_email("learner@example.com", "654321", purpose="login")
+            self.assertTrue(success)
+            self.assertEqual(msg, "Email sent successfully.")
+
+            mock_urlopen.assert_called_once()
+            call_args, call_kwargs = mock_urlopen.call_args
+            req = call_args[0]
+
+            self.assertEqual(req.full_url, "https://api.resend.com/emails")
+            self.assertEqual(req.get_method(), "POST")
+            self.assertEqual(req.headers.get("Authorization"), "Bearer re_mock_test_key_12345")
+            self.assertEqual(req.headers.get("Content-type"), "application/json")
+            self.assertEqual(req.headers.get("User-agent"), "Yukti/1.0")
+            self.assertEqual(call_kwargs.get("timeout"), 10)
+
+            import json
+            payload = json.loads(req.data.decode("utf-8"))
+            self.assertEqual(payload["from"], "Yukti Auth <auth@testdomain.com>")
+            self.assertEqual(payload["to"], ["learner@example.com"])
+            self.assertIn("654321", payload["text"])
+
+    @patch("urllib.request.urlopen")
+    def test_resend_send_email_authorization_failure(self, mock_urlopen):
+        """Verifies that Resend 401 Unauthorized returns graceful error and does NOT fall back to SMTP."""
+        import urllib.error
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            "https://api.resend.com/emails", 401, "Unauthorized", {}, None
+        )
+
+        env_vars = {
+            "RESEND_API_KEY": "re_invalid_key",
+            "SMTP_HOST": "smtp.gmail.com",
+            "SMTP_USER": "test@gmail.com",
+            "SMTP_PASS": "pass",
+            "ALLOW_MOCK_OTP": "false",
+            "FLASK_ENV": "production"
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            with patch("smtplib.SMTP") as mock_smtp:
+                success, msg = OTPProvider.send_email("learner@example.com", "654321", purpose="login")
+                self.assertFalse(success)
+                self.assertIn("Failed to send verification email", msg)
+                # Resend must NOT fall back to SMTP when configured
+                mock_smtp.assert_not_called()
+
+    @patch("urllib.request.urlopen")
+    def test_resend_send_email_http_error(self, mock_urlopen):
+        """Verifies that Resend 403 Forbidden returns graceful error without crashing."""
+        import urllib.error
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            "https://api.resend.com/emails", 403, "Forbidden", {}, None
+        )
+
+        env_vars = {"RESEND_API_KEY": "re_mock_key"}
+        with patch.dict(os.environ, env_vars, clear=False):
+            success, msg = OTPProvider.send_email("learner@example.com", "654321", purpose="login")
+            self.assertFalse(success)
+            self.assertIn("Failed to send verification email", msg)
+
+    @patch("urllib.request.urlopen")
+    def test_resend_send_email_timeout(self, mock_urlopen):
+        """Verifies that Resend timeout returns graceful error without crashing."""
+        mock_urlopen.side_effect = TimeoutError("The read operation timed out")
+
+        env_vars = {"RESEND_API_KEY": "re_mock_key"}
+        with patch.dict(os.environ, env_vars, clear=False):
+            success, msg = OTPProvider.send_email("learner@example.com", "654321", purpose="login")
+            self.assertFalse(success)
+            self.assertIn("Failed to send verification email", msg)
+
+    @patch("urllib.request.urlopen")
+    def test_resend_otp_cleanup_on_failure(self, mock_urlopen):
+        """Verifies that OTP is purged from store when Resend dispatch fails."""
+        import urllib.error
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            "https://api.resend.com/emails", 500, "Internal Server Error", {}, None
+        )
+
+        env_vars = {"RESEND_API_KEY": "re_mock_key", "ALLOW_MOCK_OTP": "false"}
+        with patch.dict(os.environ, env_vars, clear=False):
+            with patch("services.otp_service._otp_store.delete") as mock_delete:
+                with patch("services.otp_service._otp_store.can_resend", return_value=(True, 0)):
+                    with patch("services.otp_service._otp_store.save"):
+                        success, msg, meta = OTPService.send_otp("learner@example.com", "email", purpose="login")
+                        self.assertFalse(success)
+                        mock_delete.assert_called_once_with("learner@example.com", purpose="login")
+
+    @patch("smtplib.SMTP")
+    def test_resend_absent_falls_back_to_smtp(self, mock_smtp):
+        """Verifies that when RESEND_API_KEY is absent, SMTP configuration is used."""
+        mock_instance = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = mock_instance
+
+        env_vars = {
+            "RESEND_API_KEY": "",
+            "SMTP_HOST": "smtp.custom.org",
+            "SMTP_PORT": "587",
+            "SMTP_USER": "custom_user@custom.org",
+            "SMTP_PASS": "custom_pass",
+            "ALLOW_MOCK_OTP": "false"
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            success, msg = OTPProvider.send_email("learner@example.com", "123456", purpose="login")
+            self.assertTrue(success)
+            mock_smtp.assert_called_once_with("smtp.custom.org", 587, timeout=10)
+
 
 if __name__ == "__main__":
     unittest.main()

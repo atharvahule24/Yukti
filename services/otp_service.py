@@ -508,6 +508,9 @@ class OTPProvider:
 
     @staticmethod
     def send_email(email: str, otp: str, purpose: str = "login") -> Tuple[bool, str]:
+        resend_api_key = os.getenv("RESEND_API_KEY")
+        resend_from = os.getenv("RESEND_FROM", "Yukti <onboarding@resend.dev>")
+
         smtp_host = os.getenv("SMTP_HOST")
         smtp_port = os.getenv("SMTP_PORT")
         smtp_user = os.getenv("SMTP_USER")
@@ -523,6 +526,44 @@ class OTPProvider:
             subject = "Yukti Verification Code"
             body_text = f"Your Yukti verification code is: {otp}\nValid for 5 minutes."
 
+        # 1. Primary HTTPS Provider: Resend API (Preferred for cloud containers)
+        if resend_api_key:
+            try:
+                import json
+                import urllib.request
+                import urllib.error
+
+                payload = json.dumps({
+                    "from": resend_from,
+                    "to": [email],
+                    "subject": subject,
+                    "text": body_text
+                }).encode("utf-8")
+
+                req = urllib.request.Request(
+                    "https://api.resend.com/emails",
+                    data=payload,
+                    headers={
+                        "Authorization": f"Bearer {resend_api_key}",
+                        "Content-Type": "application/json",
+                        "User-Agent": "Yukti/1.0"
+                    },
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    if resp.status in (200, 201):
+                        logger.info(f"Dispatched {purpose} email OTP to {mask_target(email)} via Resend HTTPS API.")
+                        return True, "Email sent successfully."
+                    logger.error(f"Resend API returned unexpected status code: {resp.status}")
+                    return False, "Failed to send verification email. Please try again later."
+            except urllib.error.HTTPError as e:
+                logger.error(f"Resend API HTTP error: {e.code} {e.reason}")
+                return False, "Failed to send verification email. Please try again later."
+            except Exception as e:
+                logger.error(f"Failed to send email OTP via Resend: {type(e).__name__}")
+                return False, "Failed to send verification email. Please try again later."
+
+        # 2. Secondary Provider: SMTP (used only when RESEND_API_KEY is absent)
         if smtp_host and smtp_user and smtp_pass:
             try:
                 import smtplib
@@ -544,7 +585,7 @@ class OTPProvider:
                 return False, "Failed to send verification email. Please try again later."
 
         if not OTPProvider._is_mock_allowed():
-            logger.error("SMTP provider not configured and mock OTP is disallowed in production.")
+            logger.error("Email provider not configured and mock OTP is disallowed in production.")
             return False, "Email service is not configured. Please contact support."
 
         # Dev / Testing / Mock fallback - never log plaintext OTP at INFO in production
