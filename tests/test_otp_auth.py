@@ -778,24 +778,24 @@ class TestOTPServiceAndRoutes(unittest.TestCase):
                         self.assertFalse(meta.get("ambiguous_delivery", False))
                         mock_delete.assert_called_once_with("+1234567890", purpose="login")
 
-    # --- 8. Twilio REST SMS Provider Tests (Standard urllib.request) ---
+    # --- 8. Twilio Verify REST SMS Provider Tests (Standard urllib.request) ---
     @patch("urllib.request.urlopen")
-    def test_send_sms_success(self, mock_urlopen):
-        """Verifies successful SMS dispatch via standard urllib.request to Twilio Messages API."""
+    def test_send_sms_verify_success(self, mock_urlopen):
+        """Verifies successful SMS dispatch via standard urllib.request to Twilio Verify Verifications API."""
         mock_resp = MagicMock()
         mock_resp.status = 201
-        mock_resp.read.return_value = b'{"sid": "SM_test_mock_sid_123", "status": "queued"}'
+        mock_resp.read.return_value = b'{"sid": "VE_mock_verify_sid", "status": "pending"}'
         mock_urlopen.return_value.__enter__.return_value = mock_resp
 
         env_vars = {
             "TWILIO_ACCOUNT_SID": "AC_mock_account_sid_12345",
             "TWILIO_AUTH_TOKEN": "mock_auth_token_67890",
-            "TWILIO_FROM_NUMBER": "+15005550006",
+            "TWILIO_VERIFY_SERVICE_SID": "VA_mock_service_sid_12345",
             "ALLOW_MOCK_OTP": "false",
             "FLASK_ENV": "production"
         }
         with patch.dict(os.environ, env_vars, clear=False):
-            success, msg = OTPProvider.send_sms("+1234567890", "123456")
+            success, msg = OTPProvider.send_sms("+1234567890")
             self.assertTrue(success)
             self.assertEqual(msg, "SMS sent successfully.")
 
@@ -804,122 +804,122 @@ class TestOTPServiceAndRoutes(unittest.TestCase):
             req = mock_urlopen.call_args[0][0]
             self.assertEqual(
                 req.full_url,
-                "https://api.twilio.com/2010-04-01/Accounts/AC_mock_account_sid_12345/Messages.json"
+                "https://verify.twilio.com/v2/Services/VA_mock_service_sid_12345/Verifications"
             )
             self.assertEqual(req.get_method(), "POST")
             self.assertTrue(req.headers.get("Authorization", "").startswith("Basic "))
             self.assertEqual(req.headers.get("Content-type"), "application/x-www-form-urlencoded")
             payload = req.data.decode("utf-8")
-            self.assertIn("From=%2B15005550006", payload)
             self.assertIn("To=%2B1234567890", payload)
-            self.assertIn("123456", payload)
+            self.assertIn("Channel=sms", payload)
 
-    def test_send_sms_missing_config_in_production(self):
-        """Verifies that missing Twilio configuration in production returns configuration error."""
+    def test_send_sms_verify_missing_config_in_production(self):
+        """Verifies that missing Twilio Verify configuration in production returns configuration error."""
         env_vars = {
             "TWILIO_ACCOUNT_SID": "",
             "TWILIO_AUTH_TOKEN": "",
-            "TWILIO_FROM_NUMBER": "",
+            "TWILIO_VERIFY_SERVICE_SID": "",
             "ALLOW_MOCK_OTP": "false",
             "FLASK_ENV": "production",
             "TESTING": "",
             "YUKTI_TEST_MODE": ""
         }
         with patch.dict(os.environ, env_vars, clear=False):
-            success, msg = OTPProvider.send_sms("+1234567890", "123456")
+            success, msg = OTPProvider.send_sms("+1234567890")
             self.assertFalse(success)
             self.assertEqual(msg, "SMS service is not configured. Please contact support.")
 
+    def test_mock_otp_strictly_disallowed_in_production_even_if_allow_mock_true(self):
+        """Verifies that production strictly disables mock OTP even when ALLOW_MOCK_OTP is set to 'true'."""
+        env_vars = {
+            "TWILIO_ACCOUNT_SID": "",
+            "TWILIO_AUTH_TOKEN": "",
+            "TWILIO_VERIFY_SERVICE_SID": "",
+            "RESEND_API_KEY": "",
+            "SMTP_HOST": "",
+            "ALLOW_MOCK_OTP": "true",
+            "FLASK_ENV": "production",
+            "TESTING": "",
+            "YUKTI_TEST_MODE": ""
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            self.assertFalse(OTPProvider._is_mock_allowed())
+            success_sms, msg_sms = OTPProvider.send_sms("+1234567890")
+            self.assertFalse(success_sms)
+            self.assertEqual(msg_sms, "SMS service is not configured. Please contact support.")
+            success_email, msg_email = OTPProvider.send_email("test@example.com", "123456")
+            self.assertFalse(success_email)
+            self.assertEqual(msg_email, "Email service is not configured. Please contact support.")
+
     @patch("urllib.request.urlopen")
-    def test_send_sms_unverified_recipient_error_21608(self, mock_urlopen):
+    def test_send_sms_verify_unverified_recipient_error_21608(self, mock_urlopen):
         """Verifies that Twilio Error 21608 (trial unverified recipient) returns safe, specific error message."""
         import io
         import urllib.error
         err_body = b'{"code": 21608, "message": "The number is unverified. Trial accounts cannot send messages to unverified numbers."}'
         mock_urlopen.side_effect = urllib.error.HTTPError(
-            "https://api.twilio.com", 400, "Bad Request", {}, io.BytesIO(err_body)
+            "https://verify.twilio.com", 400, "Bad Request", {}, io.BytesIO(err_body)
         )
 
         env_vars = {
             "TWILIO_ACCOUNT_SID": "AC_mock_sid",
             "TWILIO_AUTH_TOKEN": "mock_token",
-            "TWILIO_FROM_NUMBER": "+15005550006",
+            "TWILIO_VERIFY_SERVICE_SID": "VA_mock_service_sid",
             "ALLOW_MOCK_OTP": "false",
             "FLASK_ENV": "production"
         }
         with patch.dict(os.environ, env_vars, clear=False):
-            success, msg = OTPProvider.send_sms("+19999999999", "123456")
+            success, msg = OTPProvider.send_sms("+19999999999")
             self.assertFalse(success)
             self.assertIn("unverified on the SMS service", msg)
             self.assertNotIn("21608", msg)  # Raw provider error codes never leaked to user
 
     @patch("urllib.request.urlopen")
-    def test_send_sms_auth_error_401(self, mock_urlopen):
+    def test_send_sms_verify_auth_error_401(self, mock_urlopen):
         """Verifies that Twilio HTTP 401 returns clean authentication error message."""
         import io
         import urllib.error
         err_body = b'{"code": 20003, "message": "Authenticate"}'
         mock_urlopen.side_effect = urllib.error.HTTPError(
-            "https://api.twilio.com", 401, "Unauthorized", {}, io.BytesIO(err_body)
+            "https://verify.twilio.com", 401, "Unauthorized", {}, io.BytesIO(err_body)
         )
 
         env_vars = {
             "TWILIO_ACCOUNT_SID": "AC_mock_sid",
             "TWILIO_AUTH_TOKEN": "invalid_token",
-            "TWILIO_FROM_NUMBER": "+15005550006",
+            "TWILIO_VERIFY_SERVICE_SID": "VA_mock_service_sid",
             "ALLOW_MOCK_OTP": "false",
             "FLASK_ENV": "production"
         }
         with patch.dict(os.environ, env_vars, clear=False):
-            success, msg = OTPProvider.send_sms("+1234567890", "123456")
+            success, msg = OTPProvider.send_sms("+1234567890")
             self.assertFalse(success)
             self.assertEqual(msg, "SMS service authentication error. Please contact support.")
 
     @patch("urllib.request.urlopen")
-    def test_send_sms_rate_limit_429(self, mock_urlopen):
-        """Verifies that Twilio HTTP 429 returns clean rate limit message."""
+    def test_send_sms_verify_rate_limit_60203(self, mock_urlopen):
+        """Verifies that Twilio Verify code 60203 returns clean rate limit message."""
         import io
         import urllib.error
-        err_body = b'{"code": 20429, "message": "Too Many Requests"}'
+        err_body = b'{"code": 60203, "message": "Max send attempts reached"}'
         mock_urlopen.side_effect = urllib.error.HTTPError(
-            "https://api.twilio.com", 429, "Too Many Requests", {}, io.BytesIO(err_body)
+            "https://verify.twilio.com", 429, "Too Many Requests", {}, io.BytesIO(err_body)
         )
 
         env_vars = {
             "TWILIO_ACCOUNT_SID": "AC_mock_sid",
             "TWILIO_AUTH_TOKEN": "mock_token",
-            "TWILIO_FROM_NUMBER": "+15005550006",
+            "TWILIO_VERIFY_SERVICE_SID": "VA_mock_service_sid",
             "ALLOW_MOCK_OTP": "false",
             "FLASK_ENV": "production"
         }
         with patch.dict(os.environ, env_vars, clear=False):
-            success, msg = OTPProvider.send_sms("+1234567890", "123456")
+            success, msg = OTPProvider.send_sms("+1234567890")
             self.assertFalse(success)
-            self.assertEqual(msg, "SMS provider rate limit exceeded. Please try again later.")
+            self.assertEqual(msg, "Too many verification attempts for this phone number. Please try again later.")
 
     @patch("urllib.request.urlopen")
-    def test_send_sms_generic_http_error_500(self, mock_urlopen):
-        """Verifies that generic server errors return standard safe failure message."""
-        import io
-        import urllib.error
-        mock_urlopen.side_effect = urllib.error.HTTPError(
-            "https://api.twilio.com", 500, "Internal Server Error", {}, io.BytesIO(b"Internal Error")
-        )
-
-        env_vars = {
-            "TWILIO_ACCOUNT_SID": "AC_mock_sid",
-            "TWILIO_AUTH_TOKEN": "mock_token",
-            "TWILIO_FROM_NUMBER": "+15005550006",
-            "ALLOW_MOCK_OTP": "false",
-            "FLASK_ENV": "production"
-        }
-        with patch.dict(os.environ, env_vars, clear=False):
-            success, msg = OTPProvider.send_sms("+1234567890", "123456")
-            self.assertFalse(success)
-            self.assertEqual(msg, "Failed to send verification SMS. Please try again later.")
-
-    @patch("urllib.request.urlopen")
-    def test_send_sms_network_error(self, mock_urlopen):
+    def test_send_sms_verify_network_error(self, mock_urlopen):
         """Verifies that DNS/network errors return safe failure message."""
         import socket
         import urllib.error
@@ -928,113 +928,220 @@ class TestOTPServiceAndRoutes(unittest.TestCase):
         env_vars = {
             "TWILIO_ACCOUNT_SID": "AC_mock_sid",
             "TWILIO_AUTH_TOKEN": "mock_token",
-            "TWILIO_FROM_NUMBER": "+15005550006",
+            "TWILIO_VERIFY_SERVICE_SID": "VA_mock_service_sid",
             "ALLOW_MOCK_OTP": "false",
             "FLASK_ENV": "production"
         }
         with patch.dict(os.environ, env_vars, clear=False):
-            success, msg = OTPProvider.send_sms("+1234567890", "123456")
+            success, msg = OTPProvider.send_sms("+1234567890")
             self.assertFalse(success)
             self.assertEqual(msg, "Failed to send verification SMS. Please try again later.")
 
     @patch("urllib.request.urlopen")
-    def test_send_sms_timeout(self, mock_urlopen):
+    def test_send_sms_verify_timeout(self, mock_urlopen):
         """Verifies that socket timeouts return safe failure message."""
         mock_urlopen.side_effect = TimeoutError("The read operation timed out")
 
         env_vars = {
             "TWILIO_ACCOUNT_SID": "AC_mock_sid",
             "TWILIO_AUTH_TOKEN": "mock_token",
-            "TWILIO_FROM_NUMBER": "+15005550006",
+            "TWILIO_VERIFY_SERVICE_SID": "VA_mock_service_sid",
             "ALLOW_MOCK_OTP": "false",
             "FLASK_ENV": "production"
         }
         with patch.dict(os.environ, env_vars, clear=False):
-            success, msg = OTPProvider.send_sms("+1234567890", "123456")
+            success, msg = OTPProvider.send_sms("+1234567890")
             self.assertFalse(success)
             self.assertEqual(msg, "Failed to send verification SMS. Please try again later.")
 
+    # --- Twilio Verify Check Tests ---
     @patch("urllib.request.urlopen")
-    def test_send_sms_malformed_json_response(self, mock_urlopen):
-        """Verifies that invalid non-JSON provider response is handled safely."""
+    def test_check_sms_verify_approved(self, mock_urlopen):
+        """Verifies successful code check via Twilio Verify VerificationCheck API."""
         mock_resp = MagicMock()
         mock_resp.status = 200
-        mock_resp.read.return_value = b"<html>Bad Gateway</html>"
+        mock_resp.read.return_value = b'{"sid": "VE_mock_sid", "status": "approved", "valid": true}'
         mock_urlopen.return_value.__enter__.return_value = mock_resp
 
         env_vars = {
             "TWILIO_ACCOUNT_SID": "AC_mock_sid",
             "TWILIO_AUTH_TOKEN": "mock_token",
-            "TWILIO_FROM_NUMBER": "+15005550006",
+            "TWILIO_VERIFY_SERVICE_SID": "VA_mock_service_sid",
             "ALLOW_MOCK_OTP": "false",
             "FLASK_ENV": "production"
         }
         with patch.dict(os.environ, env_vars, clear=False):
-            success, msg = OTPProvider.send_sms("+1234567890", "123456")
-            self.assertFalse(success)
-            self.assertEqual(msg, "Failed to send verification SMS. Please try again later.")
-
-    @patch("urllib.request.urlopen")
-    def test_send_sms_response_lacking_sid(self, mock_urlopen):
-        """Verifies that HTTP 200 without a message SID is rejected."""
-        mock_resp = MagicMock()
-        mock_resp.status = 200
-        mock_resp.read.return_value = b'{"status": "queued"}'
-        mock_urlopen.return_value.__enter__.return_value = mock_resp
-
-        env_vars = {
-            "TWILIO_ACCOUNT_SID": "AC_mock_sid",
-            "TWILIO_AUTH_TOKEN": "mock_token",
-            "TWILIO_FROM_NUMBER": "+15005550006",
-            "ALLOW_MOCK_OTP": "false",
-            "FLASK_ENV": "production"
-        }
-        with patch.dict(os.environ, env_vars, clear=False):
-            success, msg = OTPProvider.send_sms("+1234567890", "123456")
-            self.assertFalse(success)
-            self.assertEqual(msg, "Failed to send verification SMS. Please try again later.")
-
-    def test_send_sms_dev_mock_allowed(self):
-        """Verifies that development mock fallback works when ALLOW_MOCK_OTP is enabled."""
-        env_vars = {
-            "TWILIO_ACCOUNT_SID": "",
-            "TWILIO_AUTH_TOKEN": "",
-            "TWILIO_FROM_NUMBER": "",
-            "ALLOW_MOCK_OTP": "true",
-            "FLASK_ENV": "development"
-        }
-        with patch.dict(os.environ, env_vars, clear=False):
-            success, msg = OTPProvider.send_sms("+1234567890", "123456")
+            success, msg = OTPProvider.check_sms("+1234567890", "654321")
             self.assertTrue(success)
-            self.assertIn("development/mock provider", msg)
+            self.assertEqual(msg, "Code verified successfully.")
+
+            req = mock_urlopen.call_args[0][0]
+            self.assertEqual(
+                req.full_url,
+                "https://verify.twilio.com/v2/Services/VA_mock_service_sid/VerificationCheck"
+            )
+            payload = req.data.decode("utf-8")
+            self.assertIn("To=%2B1234567890", payload)
+            self.assertIn("Code=654321", payload)
 
     @patch("urllib.request.urlopen")
-    def test_otp_service_send_and_verify_phone_otp_end_to_end(self, mock_urlopen):
-        """Verifies end-to-end phone OTP flow: send via Twilio REST, store OTP, and verify."""
+    def test_check_sms_verify_wrong_code_pending(self, mock_urlopen):
+        """Verifies that an incorrect code returning pending status is treated as invalid."""
         mock_resp = MagicMock()
-        mock_resp.status = 201
-        mock_resp.read.return_value = b'{"sid": "SM_e2e_sid_12345", "status": "sent"}'
+        mock_resp.status = 200
+        mock_resp.read.return_value = b'{"sid": "VE_mock_sid", "status": "pending", "valid": false}'
         mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+        env_vars = {
+            "TWILIO_ACCOUNT_SID": "AC_mock_sid",
+            "TWILIO_AUTH_TOKEN": "mock_token",
+            "TWILIO_VERIFY_SERVICE_SID": "VA_mock_service_sid",
+            "ALLOW_MOCK_OTP": "false",
+            "FLASK_ENV": "production"
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            success, msg = OTPProvider.check_sms("+1234567890", "000000")
+            self.assertFalse(success)
+            self.assertIn("Invalid verification code", msg)
+
+    @patch("urllib.request.urlopen")
+    def test_check_sms_verify_expired_or_not_found_404(self, mock_urlopen):
+        """Verifies that HTTP 404 from VerificationCheck is reported as expired code."""
+        import io
+        import urllib.error
+        err_body = b'{"code": 20404, "message": "The requested resource was not found"}'
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            "https://verify.twilio.com", 404, "Not Found", {}, io.BytesIO(err_body)
+        )
+
+        env_vars = {
+            "TWILIO_ACCOUNT_SID": "AC_mock_sid",
+            "TWILIO_AUTH_TOKEN": "mock_token",
+            "TWILIO_VERIFY_SERVICE_SID": "VA_mock_service_sid",
+            "ALLOW_MOCK_OTP": "false",
+            "FLASK_ENV": "production"
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            success, msg = OTPProvider.check_sms("+1234567890", "123456")
+            self.assertFalse(success)
+            self.assertIn("expired or was not requested", msg)
+
+    @patch("urllib.request.urlopen")
+    def test_check_sms_verify_max_attempts_reached_60202(self, mock_urlopen):
+        """Verifies that Twilio code 60202 invalidates the code due to too many failed attempts."""
+        import io
+        import urllib.error
+        err_body = b'{"code": 60202, "message": "Max check attempts reached"}'
+        mock_urlopen.side_effect = urllib.error.HTTPError(
+            "https://verify.twilio.com", 400, "Bad Request", {}, io.BytesIO(err_body)
+        )
+
+        env_vars = {
+            "TWILIO_ACCOUNT_SID": "AC_mock_sid",
+            "TWILIO_AUTH_TOKEN": "mock_token",
+            "TWILIO_VERIFY_SERVICE_SID": "VA_mock_service_sid",
+            "ALLOW_MOCK_OTP": "false",
+            "FLASK_ENV": "production"
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            success, msg = OTPProvider.check_sms("+1234567890", "123456")
+            self.assertFalse(success)
+            self.assertIn("Too many failed attempts", msg)
+
+    # --- End-to-End Phone OTP via Twilio Verify ---
+    @patch("services.otp_service.is_production", return_value=False)
+    @patch("urllib.request.urlopen")
+    def test_otp_service_phone_verify_end_to_end_flow(self, mock_urlopen, mock_prod):
+        """Verifies full end-to-end phone OTP flow: send verification, purpose isolation, and check verification."""
+        # 1. Send verification (Twilio Verifications endpoint)
+        mock_resp_send = MagicMock()
+        mock_resp_send.status = 201
+        mock_resp_send.read.return_value = b'{"sid": "VE_test_send_sid", "status": "pending"}'
+
+        mock_urlopen.return_value.__enter__.return_value = mock_resp_send
 
         target_phone = "+15551234567"
         env_vars = {
             "TWILIO_ACCOUNT_SID": "AC_e2e_sid",
             "TWILIO_AUTH_TOKEN": "e2e_token",
-            "TWILIO_FROM_NUMBER": "+15005550006",
+            "TWILIO_VERIFY_SERVICE_SID": "VA_e2e_verify_sid",
             "ALLOW_MOCK_OTP": "false",
-            "TESTING": "true"
+            "FLASK_ENV": "testing"
         }
         with patch.dict(os.environ, env_vars, clear=False):
-            success, send_msg, meta = OTPService.send_otp(target_phone, "phone", purpose="login")
-            self.assertTrue(success)
+            send_ok, send_msg, meta = OTPService.send_otp(target_phone, "phone", purpose="login")
+            self.assertTrue(send_ok)
             self.assertEqual(meta["target"], "+15****67")
-            otp_code = meta.get("debug_otp")
-            self.assertIsNotNone(otp_code)
 
-            # Verification succeeds with the correct code
-            ok, v_msg = OTPService.verify_otp(target_phone, "phone", otp_code, purpose="login")
-            self.assertTrue(ok)
-            self.assertEqual(v_msg, "Code verified successfully.")
+            # 2. Strict Purpose Isolation: Attempting to verify for "password_reset" MUST fail!
+            wrong_purpose_ok, wrong_purpose_msg = OTPService.verify_otp(
+                target_phone, "phone", "123456", purpose="password_reset"
+            )
+            self.assertFalse(wrong_purpose_ok)
+            self.assertIn("expired or was not requested", wrong_purpose_msg)
+
+            # 3. Check verification for correct purpose "login" (Twilio VerificationCheck endpoint)
+            mock_resp_check = MagicMock()
+            mock_resp_check.status = 200
+            mock_resp_check.read.return_value = b'{"sid": "VE_test_send_sid", "status": "approved", "valid": true}'
+            mock_urlopen.return_value.__enter__.return_value = mock_resp_check
+
+            verify_ok, verify_msg = OTPService.verify_otp(target_phone, "phone", "123456", purpose="login")
+            self.assertTrue(verify_ok)
+            self.assertEqual(verify_msg, "Code verified successfully.")
+
+            # 4. Single-use consumption: Attempting to verify again MUST fail
+            second_verify_ok, second_verify_msg = OTPService.verify_otp(target_phone, "phone", "123456", purpose="login")
+            self.assertFalse(second_verify_ok)
+            self.assertIn("expired or was not requested", second_verify_msg)
+
+    @patch("services.otp_service.is_production", return_value=False)
+    @patch("urllib.request.urlopen")
+    def test_otp_service_phone_verify_attempt_lockout(self, mock_urlopen, mock_prod):
+        """Verifies that consecutive wrong verification checks track attempts and invalidate the record."""
+        # 1. Send verification
+        mock_resp_send = MagicMock()
+        mock_resp_send.status = 201
+        mock_resp_send.read.return_value = b'{"sid": "VE_test_send_sid", "status": "pending"}'
+        mock_urlopen.return_value.__enter__.return_value = mock_resp_send
+
+        target_phone = "+15559876543"
+        env_vars = {
+            "TWILIO_ACCOUNT_SID": "AC_lockout_sid",
+            "TWILIO_AUTH_TOKEN": "lockout_token",
+            "TWILIO_VERIFY_SERVICE_SID": "VA_lockout_verify_sid",
+            "ALLOW_MOCK_OTP": "false",
+            "FLASK_ENV": "testing"
+        }
+        with patch.dict(os.environ, env_vars, clear=False):
+            send_ok, _, _ = OTPService.send_otp(target_phone, "phone", purpose="login")
+            self.assertTrue(send_ok)
+
+            # 2. Check returns pending (wrong code)
+            mock_resp_pending = MagicMock()
+            mock_resp_pending.status = 200
+            mock_resp_pending.read.return_value = b'{"sid": "VE_test_send_sid", "status": "pending", "valid": false}'
+            mock_urlopen.return_value.__enter__.return_value = mock_resp_pending
+
+            # Attempt 1
+            ok1, msg1 = OTPService.verify_otp(target_phone, "phone", "000001", purpose="login")
+            self.assertFalse(ok1)
+            self.assertIn("2 attempt(s) remaining", msg1)
+
+            # Attempt 2
+            ok2, msg2 = OTPService.verify_otp(target_phone, "phone", "000002", purpose="login")
+            self.assertFalse(ok2)
+            self.assertIn("1 attempt(s) remaining", msg2)
+
+            # Attempt 3 -> Invalidated
+            ok3, msg3 = OTPService.verify_otp(target_phone, "phone", "000003", purpose="login")
+            self.assertFalse(ok3)
+            self.assertIn("invalidated", msg3.lower())
+
+            # Attempt 4 -> Expired / not requested
+            ok4, msg4 = OTPService.verify_otp(target_phone, "phone", "000004", purpose="login")
+            self.assertFalse(ok4)
+            self.assertIn("expired", msg4.lower())
 
 
 if __name__ == "__main__":

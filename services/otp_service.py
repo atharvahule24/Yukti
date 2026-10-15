@@ -555,6 +555,8 @@ class OTPProvider:
 
     @staticmethod
     def _is_mock_allowed() -> bool:
+        if is_production():
+            return False
         return (
             os.getenv("ALLOW_MOCK_OTP", "").lower() in ("true", "1")
             or os.getenv("TESTING") == "true"
@@ -668,26 +670,25 @@ class OTPProvider:
         return EmailDispatchResult(True, "Email dispatched via development/mock provider.")
 
     @staticmethod
-    def send_sms(phone: str, otp: str) -> Tuple[bool, str]:
+    def send_sms(phone: str, otp: str = "") -> Tuple[bool, str]:
         twilio_sid = os.getenv("TWILIO_ACCOUNT_SID")
         twilio_token = os.getenv("TWILIO_AUTH_TOKEN")
-        twilio_from = os.getenv("TWILIO_FROM_NUMBER")
+        verify_sid = os.getenv("TWILIO_VERIFY_SERVICE_SID") or os.getenv("TWILIO_SERVICE_SID")
 
-        if twilio_sid and twilio_token and twilio_from:
+        if twilio_sid and twilio_token and verify_sid:
             try:
                 import base64
                 import urllib.request
                 import urllib.parse
                 import urllib.error
 
-                url = f"https://api.twilio.com/2010-04-01/Accounts/{twilio_sid}/Messages.json"
+                url = f"https://verify.twilio.com/v2/Services/{verify_sid}/Verifications"
                 auth_str = f"{twilio_sid}:{twilio_token}"
                 auth_b64 = base64.b64encode(auth_str.encode("utf-8")).decode("ascii")
 
                 payload_data = {
-                    "From": twilio_from,
                     "To": phone,
-                    "Body": f"Your Yukti verification code is: {otp}. Valid for 5 minutes."
+                    "Channel": "sms"
                 }
                 payload_bytes = urllib.parse.urlencode(payload_data).encode("utf-8")
 
@@ -709,12 +710,13 @@ class OTPProvider:
                             resp_json = json.loads(resp_body)
                         except Exception:
                             resp_json = {}
-                        if resp_json.get("sid"):
-                            logger.info(f"Dispatched SMS OTP to {mask_target(phone)} via Twilio REST API (HTTP {resp.status}).")
+                        status = resp_json.get("status")
+                        if status in ("pending", "approved") or resp_json.get("sid"):
+                            logger.info(f"Dispatched SMS verification to {mask_target(phone)} via Twilio Verify (HTTP {resp.status}, status: {status}).")
                             return True, "SMS sent successfully."
-                        logger.error(f"Twilio API returned HTTP {resp.status} but response lacked message SID for {mask_target(phone)}.")
+                        logger.error(f"Twilio Verify returned HTTP {resp.status} but unexpected payload for {mask_target(phone)}.")
                         return False, "Failed to send verification SMS. Please try again later."
-                    logger.error(f"Twilio API returned unexpected status {resp.status} for {mask_target(phone)}.")
+                    logger.error(f"Twilio Verify returned unexpected status {resp.status} for {mask_target(phone)}.")
                     return False, "Failed to send verification SMS. Please try again later."
             except urllib.error.HTTPError as e:
                 twilio_err_code = None
@@ -725,10 +727,12 @@ class OTPProvider:
                 except Exception:
                     pass
 
-                logger.error(f"Twilio API HTTP error for {mask_target(phone)}: HTTP {e.code} (Twilio code: {twilio_err_code})")
+                logger.error(f"Twilio Verify HTTP error for {mask_target(phone)}: HTTP {e.code} (Twilio code: {twilio_err_code})")
 
                 if twilio_err_code == 21608:
                     return False, "This phone number is unverified on the SMS service. Please verify your number or contact support."
+                if twilio_err_code == 60203:
+                    return False, "Too many verification attempts for this phone number. Please try again later."
                 if e.code in (401, 403):
                     return False, "SMS service authentication error. Please contact support."
                 if e.code == 429:
@@ -739,16 +743,16 @@ class OTPProvider:
                 is_pre_conn = _is_pre_connection_failure(e)
                 err_detail = getattr(e, "reason", str(e))
                 if is_pre_conn:
-                    logger.error(f"Connection failure before Twilio dispatch for {mask_target(phone)}: {type(e).__name__} ({err_detail})")
+                    logger.error(f"Connection failure before Twilio Verify dispatch for {mask_target(phone)}: {type(e).__name__} ({err_detail})")
                 else:
-                    logger.error(f"Network error during Twilio dispatch for {mask_target(phone)}: {type(e).__name__} ({err_detail})")
+                    logger.error(f"Network error during Twilio Verify dispatch for {mask_target(phone)}: {type(e).__name__} ({err_detail})")
                 return False, "Failed to send verification SMS. Please try again later."
             except Exception as e:
-                logger.error(f"Unexpected error during Twilio dispatch for {mask_target(phone)}: {type(e).__name__}")
+                logger.error(f"Unexpected error during Twilio Verify dispatch for {mask_target(phone)}: {type(e).__name__}")
                 return False, "Failed to send verification SMS. Please try again later."
 
         if not OTPProvider._is_mock_allowed():
-            logger.error("Twilio provider not configured and mock OTP is disallowed in production.")
+            logger.error("Twilio Verify provider not configured and mock OTP is disallowed in production.")
             return False, "SMS service is not configured. Please contact support."
 
         # Dev / Testing / Mock fallback - never log plaintext OTP at INFO in production
@@ -756,6 +760,98 @@ class OTPProvider:
         if os.getenv("FLASK_ENV") == "development":
             logger.debug(f"[DEV DEBUG ONLY] Plaintext OTP: {otp}")
         return True, "SMS dispatched via development/mock provider."
+
+    @staticmethod
+    def check_sms(phone: str, code: str) -> Tuple[bool, str]:
+        twilio_sid = os.getenv("TWILIO_ACCOUNT_SID")
+        twilio_token = os.getenv("TWILIO_AUTH_TOKEN")
+        verify_sid = os.getenv("TWILIO_VERIFY_SERVICE_SID") or os.getenv("TWILIO_SERVICE_SID")
+
+        if twilio_sid and twilio_token and verify_sid:
+            try:
+                import base64
+                import urllib.request
+                import urllib.parse
+                import urllib.error
+
+                url = f"https://verify.twilio.com/v2/Services/{verify_sid}/VerificationCheck"
+                auth_str = f"{twilio_sid}:{twilio_token}"
+                auth_b64 = base64.b64encode(auth_str.encode("utf-8")).decode("ascii")
+
+                payload_data = {
+                    "To": phone,
+                    "Code": code
+                }
+                payload_bytes = urllib.parse.urlencode(payload_data).encode("utf-8")
+
+                req = urllib.request.Request(
+                    url,
+                    data=payload_bytes,
+                    headers={
+                        "Authorization": f"Basic {auth_b64}",
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "User-Agent": "Yukti/1.0"
+                    },
+                    method="POST"
+                )
+
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    resp_body = resp.read().decode("utf-8")
+                    if 200 <= resp.status < 300:
+                        try:
+                            resp_json = json.loads(resp_body)
+                        except Exception:
+                            resp_json = {}
+                        status = resp_json.get("status")
+                        valid = resp_json.get("valid")
+                        if status == "approved" and valid is True:
+                            logger.info(f"Twilio Verify approved code for {mask_target(phone)}.")
+                            return True, "Code verified successfully."
+                        elif status == "pending" or valid is False:
+                            logger.warning(f"Twilio Verify rejected code (pending) for {mask_target(phone)}.")
+                            return False, "Invalid verification code. Please check the code and try again."
+                        logger.error(f"Twilio Verify check returned status '{status}' for {mask_target(phone)}.")
+                        return False, "Verification code has expired or was not requested. Please request a new code."
+                    logger.error(f"Twilio Verify check returned HTTP {resp.status} for {mask_target(phone)}.")
+                    return False, "Failed to verify code. Please try again later."
+            except urllib.error.HTTPError as e:
+                twilio_err_code = None
+                try:
+                    err_body = e.read().decode("utf-8")
+                    err_json = json.loads(err_body)
+                    twilio_err_code = err_json.get("code")
+                except Exception:
+                    pass
+
+                logger.error(f"Twilio Verify check HTTP error for {mask_target(phone)}: HTTP {e.code} (Twilio code: {twilio_err_code})")
+
+                if twilio_err_code == 60202:
+                    return False, "Too many failed attempts. Code invalidated. Please request a new code."
+                if e.code == 404 or twilio_err_code == 20404:
+                    return False, "Verification code has expired or was not requested. Please request a new code."
+                if e.code in (401, 403):
+                    return False, "SMS service authentication error. Please contact support."
+                if e.code == 429:
+                    return False, "SMS provider rate limit exceeded. Please try again later."
+
+                return False, "Failed to verify code. Please try again later."
+            except (urllib.error.URLError, TimeoutError) as e:
+                is_pre_conn = _is_pre_connection_failure(e)
+                err_detail = getattr(e, "reason", str(e))
+                if is_pre_conn:
+                    logger.error(f"Connection failure before Twilio Verify check for {mask_target(phone)}: {type(e).__name__} ({err_detail})")
+                else:
+                    logger.error(f"Network error during Twilio Verify check for {mask_target(phone)}: {type(e).__name__} ({err_detail})")
+                return False, "Failed to verify code. Please try again later."
+            except Exception as e:
+                logger.error(f"Unexpected error during Twilio Verify check for {mask_target(phone)}: {type(e).__name__}")
+                return False, "Failed to verify code. Please try again later."
+
+        if not OTPProvider._is_mock_allowed():
+            logger.error("Twilio Verify provider not configured and mock OTP is disallowed in production.")
+            return False, "SMS service is not configured. Please contact support."
+
+        return True, "Mock verification."
 
 
 
@@ -789,7 +885,7 @@ class OTPService:
             return False, err, {}
 
         try:
-            # 1. IP rate limiting
+            # 1. IP rate limiting (applies to both email and phone)
             if client_ip:
                 allowed_ip, ip_retry = _otp_store.check_ip_rate_limit(client_ip, max_requests=20, window_seconds=3600)
                 if not allowed_ip:
@@ -800,9 +896,23 @@ class OTPService:
             if not can_send:
                 return False, f"Please wait {wait_secs} seconds before requesting a new code.", {"retry_after": wait_secs}
 
-            # 3. Cryptographically secure 6-digit code
-            otp = f"{secrets.randbelow(900000) + 100000:06d}"
-            _otp_store.save(normalized, otp, ttl_seconds=300, purpose=purpose)
+            # 3. Code generation & storage
+            if target_type == "email":
+                otp = f"{secrets.randbelow(900000) + 100000:06d}"
+                _otp_store.save(normalized, otp, ttl_seconds=300, purpose=purpose)
+            else:
+                # For phone, Twilio Verify manages code generation and delivery in production.
+                # In test/mock mode without Twilio Verify credentials, generate a code for testing fixtures.
+                twilio_sid = os.getenv("TWILIO_ACCOUNT_SID")
+                twilio_token = os.getenv("TWILIO_AUTH_TOKEN")
+                verify_sid = os.getenv("TWILIO_VERIFY_SERVICE_SID") or os.getenv("TWILIO_SERVICE_SID")
+                is_twilio_configured = bool(twilio_sid and twilio_token and verify_sid)
+
+                if is_twilio_configured:
+                    otp = "__TWILIO_VERIFY__"
+                else:
+                    otp = f"{secrets.randbelow(900000) + 100000:06d}"
+                _otp_store.save(normalized, otp, ttl_seconds=600, purpose=purpose)
         except OTPStorageError as e:
             logger.error(f"OTP storage error during send_otp: {e}")
             return False, "Authentication service is temporarily unavailable. Please try again later.", {"error": "service_unavailable"}
@@ -859,14 +969,54 @@ class OTPService:
             return False, err
 
         try:
-            success, status, remaining = _otp_store.verify_and_consume(normalized, otp, purpose=purpose)
-            if success:
-                return True, "Code verified successfully."
-            if status == "invalidated":
-                return False, "Too many failed attempts. Code invalidated. Please request a new code."
-            if status == "wrong_code":
-                return False, f"Invalid verification code. {remaining} attempt(s) remaining."
-            return False, "Verification code has expired or was not requested. Please request a new code."
+            if target_type == "phone":
+                # Check that a verification was actually initiated for this target and purpose
+                record = _otp_store.get(normalized, purpose=purpose)
+                if not record:
+                    return False, "Verification code has expired or was not requested. Please request a new code."
+
+                stored_otp = record.get("otp", "")
+
+                twilio_sid = os.getenv("TWILIO_ACCOUNT_SID")
+                twilio_token = os.getenv("TWILIO_AUTH_TOKEN")
+                verify_sid = os.getenv("TWILIO_VERIFY_SERVICE_SID") or os.getenv("TWILIO_SERVICE_SID")
+                is_twilio_configured = bool(twilio_sid and twilio_token and verify_sid)
+
+                if is_twilio_configured:
+                    success, msg = OTPProvider.check_sms(normalized, str(otp).strip())
+                    if success:
+                        _otp_store.delete(normalized, purpose=purpose)
+                        return True, msg
+                    # If Twilio indicated wrong code, increment local attempts
+                    attempts = _otp_store.increment_attempts(normalized, purpose=purpose)
+                    if attempts >= 3 or "too many failed attempts" in msg.lower() or "expired" in msg.lower():
+                        _otp_store.delete(normalized, purpose=purpose)
+                        if "too many" in msg.lower() or attempts >= 3:
+                            return False, "Too many failed attempts. Code invalidated. Please request a new code."
+                        return False, msg
+                    return False, f"Invalid verification code. {3 - attempts} attempt(s) remaining."
+                else:
+                    # Mock/Dev fallback verification
+                    if not OTPProvider._is_mock_allowed():
+                        return False, "SMS service is not configured. Please contact support."
+                    success, status, remaining = _otp_store.verify_and_consume(normalized, otp, purpose=purpose)
+                    if success:
+                        return True, "Code verified successfully."
+                    if status == "invalidated":
+                        return False, "Too many failed attempts. Code invalidated. Please request a new code."
+                    if status == "wrong_code":
+                        return False, f"Invalid verification code. {remaining} attempt(s) remaining."
+                    return False, "Verification code has expired or was not requested. Please request a new code."
+            else:
+                # Email OTP verification (uses existing OTPStore)
+                success, status, remaining = _otp_store.verify_and_consume(normalized, otp, purpose=purpose)
+                if success:
+                    return True, "Code verified successfully."
+                if status == "invalidated":
+                    return False, "Too many failed attempts. Code invalidated. Please request a new code."
+                if status == "wrong_code":
+                    return False, f"Invalid verification code. {remaining} attempt(s) remaining."
+                return False, "Verification code has expired or was not requested. Please request a new code."
         except OTPStorageError as e:
             logger.error(f"OTP storage error during verify_otp: {e}")
             return False, "Authentication service is temporarily unavailable. Please try again later."
