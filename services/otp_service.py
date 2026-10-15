@@ -675,17 +675,76 @@ class OTPProvider:
 
         if twilio_sid and twilio_token and twilio_from:
             try:
-                from twilio.rest import Client as TwilioClient
-                client = TwilioClient(twilio_sid, twilio_token)
-                client.messages.create(
-                    body=f"Your Yukti verification code is: {otp}. Valid for 5 minutes.",
-                    from_=twilio_from,
-                    to=phone
+                import base64
+                import urllib.request
+                import urllib.parse
+                import urllib.error
+
+                url = f"https://api.twilio.com/2010-04-01/Accounts/{twilio_sid}/Messages.json"
+                auth_str = f"{twilio_sid}:{twilio_token}"
+                auth_b64 = base64.b64encode(auth_str.encode("utf-8")).decode("ascii")
+
+                payload_data = {
+                    "From": twilio_from,
+                    "To": phone,
+                    "Body": f"Your Yukti verification code is: {otp}. Valid for 5 minutes."
+                }
+                payload_bytes = urllib.parse.urlencode(payload_data).encode("utf-8")
+
+                req = urllib.request.Request(
+                    url,
+                    data=payload_bytes,
+                    headers={
+                        "Authorization": f"Basic {auth_b64}",
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "User-Agent": "Yukti/1.0"
+                    },
+                    method="POST"
                 )
-                logger.info(f"Dispatched SMS OTP to {mask_target(phone)} via Twilio provider.")
-                return True, "SMS sent successfully."
+
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    resp_body = resp.read().decode("utf-8")
+                    if 200 <= resp.status < 300:
+                        try:
+                            resp_json = json.loads(resp_body)
+                        except Exception:
+                            resp_json = {}
+                        if resp_json.get("sid"):
+                            logger.info(f"Dispatched SMS OTP to {mask_target(phone)} via Twilio REST API (HTTP {resp.status}).")
+                            return True, "SMS sent successfully."
+                        logger.error(f"Twilio API returned HTTP {resp.status} but response lacked message SID for {mask_target(phone)}.")
+                        return False, "Failed to send verification SMS. Please try again later."
+                    logger.error(f"Twilio API returned unexpected status {resp.status} for {mask_target(phone)}.")
+                    return False, "Failed to send verification SMS. Please try again later."
+            except urllib.error.HTTPError as e:
+                twilio_err_code = None
+                try:
+                    err_body = e.read().decode("utf-8")
+                    err_json = json.loads(err_body)
+                    twilio_err_code = err_json.get("code")
+                except Exception:
+                    pass
+
+                logger.error(f"Twilio API HTTP error for {mask_target(phone)}: HTTP {e.code} (Twilio code: {twilio_err_code})")
+
+                if twilio_err_code == 21608:
+                    return False, "This phone number is unverified on the SMS service. Please verify your number or contact support."
+                if e.code in (401, 403):
+                    return False, "SMS service authentication error. Please contact support."
+                if e.code == 429:
+                    return False, "SMS provider rate limit exceeded. Please try again later."
+
+                return False, "Failed to send verification SMS. Please try again later."
+            except (urllib.error.URLError, TimeoutError) as e:
+                is_pre_conn = _is_pre_connection_failure(e)
+                err_detail = getattr(e, "reason", str(e))
+                if is_pre_conn:
+                    logger.error(f"Connection failure before Twilio dispatch for {mask_target(phone)}: {type(e).__name__} ({err_detail})")
+                else:
+                    logger.error(f"Network error during Twilio dispatch for {mask_target(phone)}: {type(e).__name__} ({err_detail})")
+                return False, "Failed to send verification SMS. Please try again later."
             except Exception as e:
-                logger.error(f"Failed to send SMS OTP via Twilio for {mask_target(phone)}: {type(e).__name__}")
+                logger.error(f"Unexpected error during Twilio dispatch for {mask_target(phone)}: {type(e).__name__}")
                 return False, "Failed to send verification SMS. Please try again later."
 
         if not OTPProvider._is_mock_allowed():
@@ -697,6 +756,7 @@ class OTPProvider:
         if os.getenv("FLASK_ENV") == "development":
             logger.debug(f"[DEV DEBUG ONLY] Plaintext OTP: {otp}")
         return True, "SMS dispatched via development/mock provider."
+
 
 
 class OTPService:
