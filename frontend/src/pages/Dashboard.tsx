@@ -60,13 +60,23 @@ getCumulativeLearnerAnalytics()
 
 getSessions()
 .then(async data => {
-const recentSessions = data.sessions.slice(0, 5)
+const validSessions = (data.sessions || []).filter(
+  s => s.status !== 'failed' && s.status !== 'failure'
+)
+const seen = new Set<string>()
+const dedupedSessions = validSessions.filter(s => {
+  if (seen.has(s.id)) return false
+  seen.add(s.id)
+  return true
+})
+const recentSessions = dedupedSessions.slice(0, 5)
 
 setSessions(recentSessions)
 setLoading(false)
 
-if (recentSessions.length > 0) {
-  const sessionId = recentSessions[0].id
+const firstReadySession = recentSessions.find(s => s.status !== 'processing') || recentSessions[0]
+if (firstReadySession) {
+  const sessionId = firstReadySession.id
 
 try {
   const learnerNextAction = await getNextLearningAction(sessionId)
@@ -391,29 +401,26 @@ Detected {item.occurrences} times
   <button
     type="button"
     onClick={() => {
-  const targetSessionId = sessions[0]?.id
-  if (!targetSessionId) return
+      const targetSessionId = sessions[0]?.id
+      if (!targetSessionId) return
 
-  navigate(`/chat/${targetSessionId}`)
+      const promptText = [
+        `Help me continue learning with this recommended next step: ${nextAction.next_action.replaceAll('_', ' ')}.`,
+        nextAction.concept ? `Focus concept: ${nextAction.concept}.` : '',
+        `Reason: ${nextAction.reason}`,
+        `Recommended difficulty: ${nextAction.difficulty}.`,
+        `Question type: ${nextAction.question_type}.`,
+        'Explain the next step clearly and guide me interactively.',
+      ].filter(Boolean).join('\n')
 
-  window.setTimeout(() => {
-    window.dispatchEvent(
-      new CustomEvent('yukti:ask', {
-        detail: {
-          prompt: [
-            `Help me continue learning with this recommended next step: ${nextAction.next_action.replaceAll('_', ' ')}.`,
-            nextAction.concept ? `Focus concept: ${nextAction.concept}.` : '',
-            `Reason: ${nextAction.reason}`,
-            `Recommended difficulty: ${nextAction.difficulty}.`,
-            `Question type: ${nextAction.question_type}.`,
-            'Explain the next step clearly and guide me interactively.',
-          ].filter(Boolean).join('\n'),
+      navigate(`/chat/${targetSessionId}`, {
+        state: {
+          autoPrompt: promptText,
           teachingMode: 'socratic',
+          targetSessionId,
         },
       })
-    )
-  }, 500)
-}}
+    }}
     disabled={!sessions[0]?.id}
     className="w-full max-w-4xl mx-auto text-left bg-[var(--bg-surface)] border border-[var(--accent-purple-border)] rounded-[var(--radius-lg)] p-6 mb-6 transition-all hover:border-[var(--accent-purple)] hover:bg-[var(--accent-purple-dim)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-purple)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--bg-base)] disabled:cursor-default"
     aria-label="Start your next learning step"
@@ -560,10 +567,15 @@ s.created_at
 </span>
 
 <span>•</span>
-
+{s.status === 'processing' ? (
+<span className="text-[var(--accent-purple)] font-medium">
+Processing...
+</span>
+) : (
 <span>
 {s.chunk_count} chunks
 </span>
+)}
 
 </div>
 

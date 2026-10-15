@@ -100,19 +100,36 @@ class ProcessUploadTask(Task):
             full_text = "\n\n".join(full_text_parts)
             del full_text_parts
 
-            session_store[session_id] = {
+            existing_session = session_store.get(session_id) or {}
+            existing_session.update({
                 "id": session_id,
                 "title": title,
                 "original_filename": original_filename,
                 "content": full_text,
                 "full_text": full_text,
                 "is_youtube": is_youtube,
-            }
+                "status": "ready",
+                "chunk_count": chunk_count,
+            })
+            session_store[session_id] = existing_session
 
             self.update_state(state="PROGRESS", meta={"stage": "Completed!"})
             return {"status": "ready", "session_id": session_id, "chunk_count": chunk_count}
 
         except Exception as e:
+            try:
+                failed_session = session_store.get(session_id) or {}
+                failed_session.update({
+                    "id": session_id,
+                    "title": title,
+                    "original_filename": original_filename,
+                    "status": "failed",
+                    "error": str(e),
+                    "chunk_count": 0,
+                })
+                session_store[session_id] = failed_session
+            except Exception as update_err:
+                print(f"Failed to record session failure state: {update_err}")
             raise
         finally:
             if local_tmp and os.path.exists(local_tmp):

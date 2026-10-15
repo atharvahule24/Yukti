@@ -51,15 +51,17 @@ def upload():
             supabase.storage.from_("uploads").upload(storage_path, file.read(), file_options={"content-type": file.content_type})
 
             title = filename
+            task = process_upload.delay(session_id, storage_path, title, original_filename)
+
             save_session_data(session_id, {
                 "id": session_id,
                 "title": title,
                 "filename": original_filename,
                 "created_at": now,
-                "full_text": ""
+                "full_text": "",
+                "status": "processing",
+                "task_id": task.id
             }, user_id=user_id)
-
-            task = process_upload.delay(session_id, storage_path, title, original_filename)
 
         elif request.is_json:
             data, parse_error = parse_json_request(request)
@@ -75,17 +77,19 @@ def upload():
 
             title = f"YouTube Video ({url})"
             
+            task = process_upload.delay(
+                session_id, None, title, title, is_youtube=True, youtube_url=url
+            )
+
             save_session_data(session_id, {
                 "id": session_id,
                 "title": title,
                 "filename": title,
                 "created_at": now,
-                "full_text": ""
+                "full_text": "",
+                "status": "processing",
+                "task_id": task.id
             }, user_id=user_id)
-            
-            task = process_upload.delay(
-                session_id, None, title, title, is_youtube=True, youtube_url=url
-            )
         else:
             return jsonify({"error": "upload_failed", "message": "No file or youtube_url provided"}), 400
 

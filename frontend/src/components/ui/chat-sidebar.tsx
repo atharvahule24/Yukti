@@ -13,9 +13,18 @@ export function ChatSidebar({ activeSessionId }: { activeSessionId?: string }) {
   const fetchSessions = () => {
     getSessions()
       .then(data => {
-        setSessions(data.sessions)
+        const validSessions = (data.sessions || []).filter(
+          s => s.status !== 'failed' && s.status !== 'failure'
+        )
+        const seen = new Set<string>()
+        const dedupedSessions = validSessions.filter(s => {
+          if (seen.has(s.id)) return false
+          seen.add(s.id)
+          return true
+        })
+        setSessions(dedupedSessions)
         Promise.all(
-          data.sessions.map(session =>
+          dedupedSessions.map(session =>
             getProgress(session.id)
               .then(progress => [session.id, progress.mastery_pct] as const)
               .catch(() => [session.id, 0] as const)

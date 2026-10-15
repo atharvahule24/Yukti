@@ -75,6 +75,7 @@ export interface Session {
   original_filename?: string;
   created_at: string;
   chunk_count: number;
+  status?: string;
 }
 
 export interface NotePoint {

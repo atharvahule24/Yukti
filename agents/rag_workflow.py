@@ -50,16 +50,24 @@ class RagWorkflow:
             # We fetch more docs and rerank/filter by session_id if needed, or assume global store for now
             # as per standard simplified setup, if filtering by session_id isn't explicitly supported in existing code.
             # We'll fetch top 5.
-            print("VECTOR STORE LOADED:", self.vector_store.vector_store is not None)
-            print("SESSION ID:", session_id)
             self.vector_store.load(self.embedder.model)
-            docs = self.vector_store.search(message, k=5, session_id=session_id)
-            print("DOCUMENTS RETRIEVED:", len(docs))
-            context = "\n\n".join(doc.page_content for doc in docs)
-            print("===== CONTEXT START =====", flush=True)
-            print(context[:2000], flush=True)
-            print("===== CONTEXT END =====", flush=True)
-            print("CONTEXT PREVIEW:", context[:1000])
+            docs = self.vector_store.search(message, k=10, session_id=session_id)
+
+            context_parts = []
+
+            for i, doc in enumerate(docs, start=1):
+                metadata = doc.metadata or {}
+                raw_page = metadata.get("page")
+
+                # PDF loader pages are zero-based; display pages as one-based.
+                page = raw_page + 1 if isinstance(raw_page, int) else "Unknown"
+
+                context_parts.append(
+                    f"[SOURCE {i} | PDF PAGE {page}]\n"
+                    f"{doc.page_content}"
+                )
+
+            context = "\n\n".join(context_parts)
         except Exception as e:
             print("RETRIEVAL ERROR:", repr(e))
             docs = []
@@ -68,30 +76,57 @@ class RagWorkflow:
         # Node 2 & 3: Generate
         system_prompt = self._get_system_prompt(mode)
 
-        history = get_history(session_id, limit=6) if session_id else []
+        history = get_history(session_id, limit=16) if session_id else []
 
         rag_system_prompt = system_prompt + """
 
-IMPORTANT:
-The retrieved study material below IS the content of the student's uploaded document.
-You have access to this material directly.
-Do NOT say that you cannot see, open, access, or read the uploaded file.
+STRICT RAG GROUNDING RULES:
 
-Use the retrieved study material to answer the student's question.
-If the retrieved material does not contain enough information to answer,
-say that the retrieved material does not contain enough information.
+1. Answer using only the retrieved study material below.
+2. Do not introduce facts, examples, species names, definitions,
+   or explanations that are not supported by the retrieved material.
+3. If the material does not support a claim, do not guess.
+   Clearly state that the retrieved material does not provide
+   enough information.
+4. Preserve the terminology used in the source.
+   Do not replace textbook examples with your own examples.
+5. Every factual claim about the uploaded document must be
+   supported by a relevant source marker such as [SOURCE 1].
+6. Use the PDF page number shown in the source marker when
+   referring to a page. Do not invent page references.
+7. Distinguish explicitly between information stated in the
+   source and information that cannot be verified from it.
+
+8. Treat each [SOURCE n | PDF PAGE p] header as authoritative.
+   SOURCE n identifies the retrieved chunk numbered n in the context.
+9. Never invent, renumber, or guess a source ID or PDF page.
+10. Cite a claim only when that specific retrieved chunk supports it.
+11. If no retrieved chunk supports a claim, say the provided
+    retrieved material does not establish it.
+12. Do not cite a source merely because it is present in context;
+    verify that its text supports the claim.
+
 
 Retrieved study material:
 {context}
 """
 
-        history_messages = [
-            HumanMessage(content=item["content"])
-            if item["role"] == "user"
-            else AIMessage(content=item["content"])
-            for item in history
-            if item["role"] in {"user", "assistant"}
-        ]
+        history_messages = []
+        last_role = None
+        last_content = None
+        for item in history:
+            role = item.get("role")
+            content = item.get("content")
+            if role in {"user", "assistant"}:
+                if role == last_role and content == last_content:
+                    continue
+                last_role = role
+                last_content = content
+                history_messages.append(
+                    HumanMessage(content=content)
+                    if role == "user"
+                    else AIMessage(content=content)
+                )
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", rag_system_prompt),
@@ -121,19 +156,69 @@ Retrieved study material:
 
         answer = response.content or ""
 
+        import re
+
+        # Flexible regex matching [SOURCE n] or [SOURCE n | PDF PAGE p] across brackets and parentheses
+        source_marker_pattern = re.compile(
+            r"[\[(【]\s*SOURCE\s+(\d+)(?:\s*[\|,]\s*(?:PDF\s+)?PAGE\s+\d+)?\s*[\])】]",
+            flags=re.IGNORECASE,
+        )
+
+        valid_cited_source_ids = set()
+
+        def normalize_and_validate_marker(match):
+            try:
+                source_id = int(match.group(1))
+            except (ValueError, TypeError):
+                return ""
+
+            # Validate against actual retrieved documents (1 <= source_id <= len(docs))
+            if 1 <= source_id <= len(docs):
+                valid_cited_source_ids.add(source_id)
+                # Derive PDF page number strictly from document metadata; never trust LLM output
+                raw_page = (docs[source_id - 1].metadata or {}).get("page")
+                page = (
+                    raw_page + 1
+                    if isinstance(raw_page, int) and not isinstance(raw_page, bool)
+                    else "Unknown"
+                )
+                return f"[SOURCE {source_id} | PDF PAGE {page}]"
+
+            # Reject invalid or out-of-range source IDs: strip from answer text
+            return ""
+
+        answer = source_marker_pattern.sub(normalize_and_validate_marker, answer).strip()
+
         if answer:
             yield {"type": "token", "data": answer}
 
-        print("===== LLM GENERATION END =====", flush=True)
         if session_id and answer:
-            save_message(session_id, "assistant", answer, datetime.now(timezone.utc).isoformat())
+            save_message(
+                session_id,
+                "assistant",
+                answer,
+                datetime.now(timezone.utc).isoformat(),
+            )
 
         citations = []
-        for doc in docs:
+
+        for source_id in sorted(valid_cited_source_ids):
+            doc = docs[source_id - 1]
             meta = doc.metadata or {}
+            raw_page = meta.get("page")
+
             citations.append({
-                "text": doc.page_content[:120] + ("..." if len(doc.page_content) > 120 else ""),
-                "page": meta.get("page"),
+                "source_id": source_id,
+                "text": doc.page_content[:120] + (
+                    "..." if len(doc.page_content) > 120 else ""
+                ),
+                "page": (
+                    raw_page + 1
+                    if isinstance(raw_page, int)
+                    and not isinstance(raw_page, bool)
+                    else None
+                ),
                 "source": meta.get("source", "document"),
             })
+
         yield {"type": "citations", "data": citations}
