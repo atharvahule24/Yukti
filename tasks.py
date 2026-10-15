@@ -94,6 +94,9 @@ class ProcessUploadTask(Task):
             import gc
             gc.collect()
 
+            if chunk_count == 0:
+                raise ValueError("No readable text could be extracted from this document.")
+
             full_text = "\n\n".join(full_text_parts)
             del full_text_parts
 
