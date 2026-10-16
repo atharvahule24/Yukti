@@ -207,35 +207,46 @@ return (
 <div className="px-4 pt-4 pb-2">
 <h4 className="text-sm font-medium text-[var(--text-secondary)]">Key topics from your material</h4>
 </div>
-<div className="grid grid-cols-2 gap-4 px-4 pb-4">
+<div className="grid grid-cols-1 xl:grid-cols-2 gap-3.5 px-3 sm:px-4 pb-4">
 {notes.map((note, idx) => {
 const colorClass = colors[idx % colors.length]
 return (
 <motion.div
 key={idx}
-whileHover={{ scale: 1.02 }}
+whileHover={{ scale: 1.01 }}
 onClick={() => setSelectedNote(note)}
-className={`cursor-pointer ${colorClass} p-4 rounded-[var(--radius-lg)] shadow-sm hover:shadow-md transition-shadow aspect-square flex flex-col relative overflow-hidden`}
+className={`cursor-pointer ${colorClass} p-3.5 sm:p-4 rounded-[var(--radius-lg)] shadow-sm hover:shadow-md transition-all min-h-[140px] flex flex-col justify-between relative overflow-hidden`}
 >
-{/* AI Badge on specific cards to add contextual signal */}
+<div>
+<div className="flex items-center justify-between gap-2 mb-2">
+<div className="flex items-center gap-1.5">
 {idx % 3 === 2 && (
-<div className="absolute top-4 left-4 bg-[var(--bg-elevated)] bg-opacity-50 text-white text-[10px] px-2 py-0.5 rounded-full font-bold">
+<span className="bg-white/10 text-white/90 text-[10px] px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">
 AI
-</div>
+</span>
 )}
-
-<div className={`flex items-start justify-between gap-2 mb-2 ${idx % 3 === 2 ? 'mt-6' : ''}`}>
-<h4 className="font-bold text-lg leading-tight line-clamp-4">{note.bullet}</h4>
 {note.importance && (
-<span className={`text-xs px-2 py-0.5 rounded-full shrink-0 ${importanceStyles[note.importance] ?? importanceStyles.low}`}>
+<span className={`text-[11px] px-2 py-0.5 rounded-full font-medium shrink-0 ${importanceStyles[note.importance] ?? importanceStyles.low}`}>
 {note.importance}
 </span>
 )}
 </div>
-<div className="flex-1" />
-<div className="flex items-center justify-between mt-auto border-t border-black/10 pt-2">
-<span className="text-xs opacity-70 font-medium">Click for details</span>
-<ChevronRight size={16} className="opacity-70" />
+</div>
+
+<h4 className="font-semibold text-sm sm:text-base leading-snug break-words line-clamp-3 mb-1.5">
+{note.bullet}
+</h4>
+
+{note.explanation && (
+<p className="text-xs opacity-75 line-clamp-2 leading-relaxed mb-2">
+{note.explanation}
+</p>
+)}
+</div>
+
+<div className="flex items-center justify-between mt-auto border-t border-white/10 pt-2 text-xs opacity-70 font-medium">
+<span>Click for details</span>
+<ChevronRight size={14} className="opacity-70" />
 </div>
 </motion.div>
 )

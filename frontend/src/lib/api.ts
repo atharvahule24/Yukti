@@ -2,13 +2,53 @@ import { getToken } from './auth';
 
 export const BASE_URL = import.meta.env.VITE_API_BASE_URL || '/api';
 
+export class TaskTerminalError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'TaskTerminalError'
+  }
+}
+
+export function isTransientNetworkError(err: unknown): boolean {
+  if (err instanceof TaskTerminalError) {
+    return false
+  }
+  const status = (err as any)?.status
+  if (status === 502 || status === 503 || status === 504) {
+    return true
+  }
+  const message = String((err as any)?.message || '')
+  if (
+    message.includes('Failed to fetch') ||
+    message.includes('NetworkError') ||
+    message.includes('Load failed') ||
+    message.includes('ECONNRESET') ||
+    message.includes('Connection terminated')
+  ) {
+    return true
+  }
+  if ((err as any)?.name === 'TypeError') {
+    return true
+  }
+  return false
+}
+
 async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const token = getToken();
   const headers = new Headers(init?.headers);
   if (token) {
     headers.set('Authorization', `Bearer ${token}`);
   }
-  return fetch(input, { ...init, headers });
+  const isIdempotent = !init?.method || init.method.toUpperCase() === 'GET' || init.method.toUpperCase() === 'HEAD';
+  try {
+    return await fetch(input, { ...init, headers });
+  } catch (err: any) {
+    if (isIdempotent && isTransientNetworkError(err)) {
+      await new Promise(r => setTimeout(r, 600));
+      return await fetch(input, { ...init, headers });
+    }
+    throw err;
+  }
 }
 export interface Node {
   id: string;
@@ -153,26 +193,6 @@ export async function uploadFile(file: File): Promise<{
   return handleResponse(response);
 }
 
-export class TaskTerminalError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'TaskTerminalError'
-  }
-}
-
-export function isTransientNetworkError(err: unknown): boolean {
-  if (err instanceof TaskTerminalError) {
-    return false
-  }
-  const status = (err as any)?.status
-  if (status === 502 || status === 503 || status === 504) {
-    return true
-  }
-  if ((err as any)?.name === 'TypeError') {
-    return true
-  }
-  return false
-}
 
 export async function getTaskStatus(taskId: string): Promise<{
   state: string;

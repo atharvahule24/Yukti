@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
-import { getGraph, getFact } from '../../lib/api'
+import { getGraph, generateGraph, getFact, getTaskStatus, TaskTerminalError, isTransientNetworkError } from '../../lib/api'
 import type { Node, Link } from '../../lib/api'
 import ForceGraph2D from 'react-force-graph-2d'
 import type { ForceGraphMethods, LinkObject, NodeObject } from 'react-force-graph-2d'
@@ -241,7 +241,6 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
       getFact(sessionId).then(res => {
         if (isMountedRef.current) setFact(res.fact)
       }).catch(() => {})
-      const { generateGraph, getTaskStatus, getGraph, TaskTerminalError, isTransientNetworkError } = await import('../../lib/api')
       const task = await generateGraph(sessionId, force) as any
       
       let attempts = 0
@@ -291,7 +290,10 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
       }
     } catch (e: any) {
       console.error(e)
-      const message = e?.message || 'Mind Map generation failed. Please try again.'
+      let message = e?.message || 'Mind Map generation failed. Please try again.'
+      if (isTransientNetworkError(e) || message === 'Failed to fetch' || e?.name === 'TypeError') {
+        message = 'The server is temporarily busy or connection was interrupted. Please wait a moment and try again.'
+      }
       toast.error(message)
       if (isMountedRef.current) setErrorMessage(message)
     } finally {

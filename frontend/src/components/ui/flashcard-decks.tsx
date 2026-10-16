@@ -96,7 +96,10 @@ export function FlashcardDecks({ sessionId }: { sessionId: string }) {
         }
     } catch (e: any) {
       console.error(e)
-      const message = e?.message || "Flashcards generation failed. Please try again."
+      let message = e?.message || "Flashcards generation failed. Please try again."
+      if (isTransientNetworkError(e) || message === 'Failed to fetch' || e?.name === 'TypeError') {
+        message = 'The server is temporarily busy or connection was interrupted. Please wait a moment and try again.'
+      }
       toast.error(message)
       if (isMountedRef.current) setErrorMessage(message)
     } finally {

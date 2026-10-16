@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { getQuiz, generateQuiz, getFact, gradeAnswer,
-recordMetacognitiveCheckin,generateReassessment,getVideoRecommendation,} from '../../lib/api'
+recordMetacognitiveCheckin,generateReassessment,getVideoRecommendation, isTransientNetworkError} from '../../lib/api'
 import type { GradeResult, MCQ, ShortAnswer } from '../../lib/api'
 import { Loader2, CheckCircle2, XCircle, ChevronRight, HelpCircle, MessageSquare, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
@@ -117,7 +117,10 @@ setShowHint(false)
 }
 } catch (e: any) {
 console.error(e)
-const message = e?.message || e?.error || 'Failed to generate quiz. Please try again.'
+let message = e?.message || e?.error || 'Failed to generate quiz. Please try again.'
+if (isTransientNetworkError(e) || message === 'Failed to fetch' || e?.name === 'TypeError') {
+  message = 'The server is temporarily busy or connection was interrupted. Please wait a moment and try again.'
+}
 toast.error(message)
 if (isMountedRef.current) {
 setErrorMessage(message)
