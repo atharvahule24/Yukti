@@ -100,8 +100,7 @@ STRICT SOURCE-GROUNDING RULES:
 9. Before returning each question, internally verify that the correct option is directly supported by the context and every distractor is either contradicted by or unsupported by the context.
 10. Return ONLY valid JSON.
 
-Generate exactly 5 multiple choice questions.
-Vary difficulty: 2 easy, 2 medium, 1 hard.
+Generate the requested number of multiple choice questions.
 
 Return:
 {
@@ -112,12 +111,12 @@ Return:
       "answer": 0,
       "difficulty": "easy or medium or hard",
       "concept": "string",
-      "explanation": "Explain why the correct answer is supported by the provided context and why the distractors are incorrect or unsupported."
+      "explanation": "Briefly explain why the correct answer is supported by the provided context."
     }
   ]
 }"""
 
-QUIZ_GROUNDING_VALIDATOR_PROMPT = """Validate whether the generated quiz question is fully grounded in the provided study material.
+QUIZ_GROUNDING_VALIDATOR_PROMPT = """Validate whether the generated quiz question and its correct answer are fully grounded in the provided study material.
 
 The study material is the ONLY source of truth.
 
@@ -126,12 +125,6 @@ Return ONLY valid JSON:
   "valid": true,
   "reason": "string",
   "question_evidence": "exact quote from source supporting the question",
-  "option_evidence": {
-    "A": "exact quote from source supporting option A",
-    "B": "exact quote from source supporting option B",
-    "C": "exact quote from source supporting option C",
-    "D": "exact quote from source supporting option D"
-  },
   "answer_evidence": "exact quote from source supporting the correct answer"
 }
 
@@ -139,33 +132,23 @@ STRICT RULES:
 
 1. Every factual claim in the question MUST be supported by the study material.
 
-2. EVERY option MUST be supported by explicit information in the study material.
+2. The correct answer MUST be directly supported by an explicit statement in the study material.
 
-3. For EVERY option, provide an exact quote copied from the study material that supports that option.
+3. Provide exact quotes copied from the study material that support the question and correct answer.
 
-4. The evidence quote must contain enough information to support the COMPLETE factual claim of that option.
+4. The evidence quote must contain enough information to support the complete factual claim of the answer.
 
-5. Do NOT use general knowledge to justify an option.
+5. Do NOT use general knowledge to justify the answer.
 
-6. Do NOT infer, extend, compare, generalize, or combine facts unless the study material explicitly supports that relationship.
-
-7. If even ONE option cannot be supported by an explicit source quote, return:
+6. If the question or correct answer cannot be supported by an explicit source quote, return:
    "valid": false
 
-8. If the question asks for a comparison, the source must explicitly provide enough information to make that comparison.
+7. When uncertain, return valid=false.
 
-9. If an option contains multiple factual claims, the evidence must support ALL of them.
-
-10. If the source does not contain evidence for a claim, do NOT manufacture evidence.
-
-11. When uncertain, return valid=false.
-
-12. The evidence quotes must be copied from the study material, not paraphrased.
-
-13. The correct answer and its explanation must also be supported by the study material.
+8. The evidence quotes must be copied from the study material, not paraphrased.
 
 IMPORTANT:
-A question is valid ONLY when the question, ALL options, correct answer, and explanation are fully supported by explicit source evidence.
+A question is valid ONLY when the question and the correct answer are fully supported by explicit source evidence.
 """
 
 QUIZ_SHORT_ANSWER_PROMPT = """Based on the provided context, generate the requested number of short answer questions.

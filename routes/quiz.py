@@ -166,7 +166,7 @@ def generate_quiz(session_id):
     valid, error = validate_extracted_text(full_text, max_length=None)
     if not valid:
         return jsonify({"error": "no_text"}), 400
-    full_text = full_text[:6000]
+    full_text = full_text[:3000]
         
     data, parse_error = parse_json_request(request)
     if parse_error:
@@ -513,7 +513,7 @@ QUESTION NOVELTY RULES:
                                     + f"""
 
 STUDY MATERIAL:
-{full_text}
+(Refer to the provided study material in context)
 
 GENERATED QUESTION:
 {json.dumps(q, ensure_ascii=False)}

@@ -4,6 +4,7 @@ FROM python:3.11-slim
 RUN apt-get update && apt-get install -y supervisor sqlite3 libgl1 media-types && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+ENV MALLOC_ARENA_MAX=2
 
 # Install Python dependencies
 COPY requirements.txt .

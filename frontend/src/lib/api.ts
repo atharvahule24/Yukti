@@ -282,8 +282,12 @@ export async function getGraph(sessionId: string): Promise<{nodes: Node[], links
   return handleResponse(response);
 }
 
-export async function generateGraph(sessionId: string): Promise<{nodes: Node[], links: Link[]}> {
-  const response = await apiFetch(`${BASE_URL}/graph/generate/${sessionId}`, { method: 'POST' });
+export async function generateGraph(sessionId: string, force = false): Promise<{nodes: Node[], links: Link[], task_id?: string, status?: string}> {
+  const response = await apiFetch(`${BASE_URL}/graph/generate/${sessionId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ force })
+  });
   return handleResponse(response);
 }
 

@@ -110,8 +110,9 @@ Text:
     model = ChatGroq(
         model_name="openai/gpt-oss-20b",
         temperature=0.1,
-        max_tokens=2048,
+        max_tokens=4096,
         api_key=groq_api_key,
+        model_kwargs={"response_format": {"type": "json_object"}},
     )
 
     chain = prompt | model | parser

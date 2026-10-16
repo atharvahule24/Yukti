@@ -91,6 +91,8 @@ class ProcessUploadTask(Task):
             # EXPLICIT MEMORY RELEASE
             del loader
             del chunker
+            del embedder
+            del vector_store
             import gc
             gc.collect()
 
@@ -137,13 +139,15 @@ class ProcessUploadTask(Task):
                     os.remove(local_tmp)
                 except Exception as e:
                     print(f"Failed to remove temporary file {local_tmp}: {e}")
+            import gc
+            gc.collect()
 
 @celery_app.celery.task(bind=True, base=ProcessUploadTask, name="tasks.process_upload")
 def process_upload(self, session_id, filepath, title, original_filename, is_youtube=False):
     return self.process_upload(session_id, filepath, title, original_filename, is_youtube)
 
 @celery_app.celery.task(bind=True, name="tasks.generate_graph")
-def generate_graph_task(self, session_id):
+def generate_graph_task(self, session_id, force=False):
     try:
         from processing.graph_extractor import extract_knowledge_graph
 
@@ -151,9 +155,18 @@ def generate_graph_task(self, session_id):
         if not session:
             raise ValueError(f"Session {session_id} not found.")
 
-        # Avoid redundant regeneration if graph is already present
+        # Helper to detect whether graph data represents a meaningful, valid graph
+        def _is_valid_graph(g):
+            if not g or not isinstance(g, dict):
+                return False
+            nodes = g.get("nodes", [])
+            links = g.get("links") or g.get("edges") or []
+            # Valid if 2+ concepts exist (even isolated), or at least 1 concept with links
+            return len(nodes) > 1 or (len(nodes) == 1 and len(links) > 0)
+
         existing_graph = session.get("graph")
-        if existing_graph and existing_graph.get("nodes") and len(existing_graph.get("nodes", [])) > 0:
+        has_valid_graph = _is_valid_graph(existing_graph)
+        if not force and has_valid_graph:
             return existing_graph
 
         self.update_state(state="PROGRESS", meta={"stage": "Generating Knowledge Graph..."})
@@ -174,6 +187,11 @@ def generate_graph_task(self, session_id):
             graph_data["links"] = graph_data.pop("edges")
         elif "links" in graph_data and "edges" not in graph_data:
             graph_data["edges"] = graph_data.get("links", [])
+
+        # Prevent overwriting an existing valid graph with a failed or empty extraction
+        if not _is_valid_graph(graph_data) and has_valid_graph:
+            print(f"Extraction returned invalid graph; preserving existing valid graph for session {session_id}.")
+            return existing_graph
             
         session["graph"] = graph_data
         session_store[session_id] = session
@@ -181,6 +199,9 @@ def generate_graph_task(self, session_id):
 
     except Exception as e:
         raise
+    finally:
+        import gc
+        gc.collect()
 
 
 @celery_app.celery.task(bind=True, name="tasks.generate_notes")
@@ -211,6 +232,9 @@ def generate_notes_task(self, session_id):
 
     except Exception as e:
         raise
+    finally:
+        import gc
+        gc.collect()
 
 
 @celery_app.celery.task(bind=True, name="tasks.generate_flashcards")
@@ -253,3 +277,6 @@ def generate_flashcards_task(self, session_id):
 
     except Exception as e:
         raise
+    finally:
+        import gc
+        gc.collect()

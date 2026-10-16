@@ -4,6 +4,7 @@ import type { Node, Link } from '../../lib/api'
 import ForceGraph2D from 'react-force-graph-2d'
 import type { ForceGraphMethods, LinkObject, NodeObject } from 'react-force-graph-2d'
 import { Loader2, Share2, X } from 'lucide-react'
+import { toast } from 'sonner'
 
 // Extended node type for styling
 interface StyledNode extends Node {
@@ -67,74 +68,154 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
   const visibleGraphData = useMemo(() => {
     if (!graphData.nodes.length) return { nodes: [], links: [] }
 
+    const styledNodes: StyledNode[] = graphData.nodes.map(n => ({ ...n }))
+    const nodeMap = new Map<string, StyledNode>(styledNodes.map(n => [n.id, n]))
+    const graphLinks = graphData.links as GraphLink[]
+
     const visibleNodes = new Set<string>()
     const incomingCount: Record<string, number> = {}
-    graphData.nodes.forEach(n => incomingCount[n.id] = 0)
-    const graphLinks = graphData.links as GraphLink[]
+    styledNodes.forEach(n => incomingCount[n.id] = 0)
     graphLinks.forEach(l => {
       const targetId = endpointId(l.target)
       incomingCount[targetId] = (incomingCount[targetId] || 0) + 1
     })
 
     // roots are nodes with 0 incoming edges
-    let roots = graphData.nodes.filter(n => incomingCount[n.id] === 0) as StyledNode[]
-    if (roots.length === 0) roots = [graphData.nodes[0] as StyledNode]
-
-    const branchColors = ['#a855f7', '#14b8a6', '#f43f5e', '#ec4899', '#f59e0b', '#3b82f6'];
-    
-    // Assign properties to nodes directly
-    const root = roots[0];
-    if (root) {
-       root.isRoot = true;
-       // find main branches
-       const mainLinks = graphLinks.filter(l => endpointId(l.source) === root.id);
-       mainLinks.forEach((l, i) => {
-          const tId = endpointId(l.target);
-          const tNode = graphData.nodes.find(n => n.id === tId) as StyledNode;
-          if (tNode) {
-             tNode.isMainBranch = true;
-             tNode.branchColor = branchColors[i % branchColors.length];
-             
-             // dfs for sub nodes
-             const stack = [tNode];
-             while(stack.length > 0) {
-               const curr = stack.pop()!;
-               const cLinks = graphLinks.filter(cl => endpointId(cl.source) === curr.id);
-               cLinks.forEach(cl => {
-                 const ctId = endpointId(cl.target);
-                 const ctNode = graphData.nodes.find(n => n.id === ctId) as StyledNode;
-                 if (ctNode && !ctNode.branchColor) {
-                    ctNode.branchColor = tNode.branchColor;
-                    ctNode.isSubNode = true;
-                    stack.push(ctNode);
-                 }
-               })
-             }
-          }
-       });
+    let roots = styledNodes.filter(n => incomingCount[n.id] === 0)
+    if (roots.length === 0 && styledNodes.length > 0) {
+      roots = [styledNodes[0]]
     }
 
-    const queue = [...roots]
+    // Ensure every disconnected component (including cyclic components without 0-incoming nodes) has a root
+    const reachedFromRoots = new Set<string>()
+    const reachQueue = roots.map(r => r.id)
+    reachQueue.forEach(id => reachedFromRoots.add(id))
+    while (reachQueue.length > 0) {
+      const currId = reachQueue.shift()!
+      graphLinks.forEach(l => {
+        const s = endpointId(l.source)
+        const t = endpointId(l.target)
+        if (s === currId && !reachedFromRoots.has(t)) {
+          reachedFromRoots.add(t)
+          reachQueue.push(t)
+        } else if (t === currId && !reachedFromRoots.has(s)) {
+          reachedFromRoots.add(s)
+          reachQueue.push(s)
+        }
+      })
+    }
+
+    // Any remaining nodes belong to disconnected cycles/components without 0-incoming roots
+    styledNodes.forEach(n => {
+      if (!reachedFromRoots.has(n.id)) {
+        roots.push(n)
+        reachedFromRoots.add(n.id)
+        reachQueue.push(n.id)
+        while (reachQueue.length > 0) {
+          const currId = reachQueue.shift()!
+          graphLinks.forEach(l => {
+            const s = endpointId(l.source)
+            const t = endpointId(l.target)
+            if (s === currId && !reachedFromRoots.has(t)) {
+              reachedFromRoots.add(t)
+              reachQueue.push(t)
+            } else if (t === currId && !reachedFromRoots.has(s)) {
+              reachedFromRoots.add(s)
+              reachQueue.push(s)
+            }
+          })
+        }
+      }
+    })
+
+    const branchColors = ['#a855f7', '#14b8a6', '#f43f5e', '#ec4899', '#f59e0b', '#3b82f6']
+    let colorIdx = 0
+
+    // Mark the primary root
+    const primaryRoot = roots[0]
+    if (primaryRoot) {
+      primaryRoot.isRoot = true
+    }
+
+    // Assign branch colors across roots and their sub-trees with cycle safety
+    roots.forEach((rt, rIdx) => {
+      if (rIdx > 0 && !rt.branchColor) {
+        rt.branchColor = branchColors[colorIdx++ % branchColors.length]
+        rt.isMainBranch = true
+      }
+
+      const mainLinks = graphLinks.filter(l => endpointId(l.source) === rt.id || endpointId(l.target) === rt.id)
+      mainLinks.forEach(l => {
+        const neighborId = endpointId(l.source) === rt.id ? endpointId(l.target) : endpointId(l.source)
+        const neighborNode = nodeMap.get(neighborId)
+        if (neighborNode && !neighborNode.isRoot && !neighborNode.branchColor) {
+          neighborNode.isMainBranch = true
+          neighborNode.branchColor = branchColors[colorIdx++ % branchColors.length]
+
+          // Cycle-safe DFS for sub nodes
+          const visitedSubNodes = new Set<string>([rt.id, neighborNode.id])
+          const stack = [neighborNode]
+          while (stack.length > 0) {
+            const curr = stack.pop()!
+            const cLinks = graphLinks.filter(cl => endpointId(cl.source) === curr.id || endpointId(cl.target) === curr.id)
+            cLinks.forEach(cl => {
+              const ctId = endpointId(cl.source) === curr.id ? endpointId(cl.target) : endpointId(cl.source)
+              if (!visitedSubNodes.has(ctId)) {
+                visitedSubNodes.add(ctId)
+                const ctNode = nodeMap.get(ctId)
+                if (ctNode && !ctNode.isRoot) {
+                  if (!ctNode.branchColor) {
+                    ctNode.branchColor = neighborNode.branchColor
+                    ctNode.isSubNode = true
+                  }
+                  stack.push(ctNode)
+                }
+              }
+            })
+          }
+        }
+      })
+    })
+
+    // Cycle-safe BFS traversal for visibility
+    const queue: StyledNode[] = []
+    const enqueued = new Set<string>()
+
+    roots.forEach(r => {
+      queue.push(r)
+      enqueued.add(r.id)
+    })
+
     while (queue.length > 0) {
       const node = queue.shift()!
-      if (visibleNodes.has(node.id)) continue
       visibleNodes.add(node.id)
 
       if (expandedNodes.has(node.id)) {
-        const childrenLinks = graphLinks.filter(l => {
-          const sourceId = endpointId(l.source)
-          return sourceId === node.id
+        const neighborLinks = graphLinks.filter(l => {
+          return endpointId(l.source) === node.id || endpointId(l.target) === node.id
         })
-        childrenLinks.forEach(l => {
-          const targetId = endpointId(l.target)
-          const targetNode = graphData.nodes.find(n => n.id === targetId) as StyledNode
-          if (targetNode) queue.push(targetNode)
+        neighborLinks.forEach(l => {
+          const neighborId = endpointId(l.source) === node.id ? endpointId(l.target) : endpointId(l.source)
+          if (!enqueued.has(neighborId)) {
+            const neighborNode = nodeMap.get(neighborId)
+            if (neighborNode) {
+              enqueued.add(neighborId)
+              queue.push(neighborNode)
+            }
+          }
         })
       }
     }
 
+    // Ensure all expanded nodes are visible even if disconnected
+    styledNodes.forEach(n => {
+      if (expandedNodes.has(n.id)) {
+        visibleNodes.add(n.id)
+      }
+    })
+
     return {
-      nodes: graphData.nodes.filter(n => visibleNodes.has(n.id)) as StyledNode[],
+      nodes: styledNodes.filter(n => visibleNodes.has(n.id)),
       links: graphLinks.filter(l => {
         const sourceId = endpointId(l.source)
         const targetId = endpointId(l.target)
@@ -143,13 +224,13 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
     }
   }, [graphData, expandedNodes])
 
-  const handleGenerate = async () => {
-    if (!sessionId) return
+  const handleGenerate = async (force = false) => {
+    if (!sessionId || generating) return
     setGenerating(true)
     try {
       getFact(sessionId).then(res => setFact(res.fact)).catch(() => {})
       const { generateGraph, getTaskStatus, getGraph } = await import('../../lib/api')
-      const task = await generateGraph(sessionId) as any
+      const task = await generateGraph(sessionId, force) as any
       
       let attempts = 0
       const maxAttempts = 60
@@ -181,6 +262,7 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
       }
     } catch (e) {
       console.error(e)
+      toast.error('Mind Map generation failed. Please try again.')
     } finally {
       setGenerating(false)
     }
@@ -217,7 +299,9 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
 
   if (loading) return <div className="flex justify-center p-8"><Loader2 className="animate-spin text-[var(--accent-purple)]" /></div>
   
-  if (graphData.nodes.length === 0) {
+  const isDegenerate = graphData.nodes.length === 0 || (graphData.nodes.length <= 1 && (!graphData.links || graphData.links.length === 0))
+
+  if (isDegenerate) {
     if (generating) {
        return (
          <div className="flex flex-col items-center justify-center p-12 bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] text-center h-[500px] w-full max-w-sm mx-auto mt-12">
@@ -238,8 +322,8 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
         <h3 className="text-xl font-bold mb-4 text-[var(--text-primary)]">Knowledge Graph</h3>
         <p className="text-sm text-[var(--text-secondary)] mb-6 text-center">Generate a hierarchical mind map to visualize topics and subtopics from your material.</p>
         <button
-          onClick={handleGenerate}
-          className="w-full max-w-sm flex items-center justify-center gap-2 bg-[var(--accent-purple)] text-white py-3 rounded-[var(--radius)] font-bold hover:opacity-90 transition-all"
+          onClick={() => handleGenerate(true)}
+          className="w-full max-w-sm flex items-center justify-center gap-2 bg-[var(--accent-purple)] text-white py-3 rounded-[var(--radius)] font-bold hover:opacity-90 transition-all cursor-pointer"
         >
           <Share2 size={18} /> Generate Mind Map
         </button>
@@ -250,9 +334,19 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
   return (
     <div className="w-full h-full min-h-[600px] bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] overflow-hidden relative">
        {/* Hierarchy tree overlay instructions */}
-       <div className="absolute top-4 left-4 z-10 bg-[var(--bg-elevated)] border border-[var(--border)] p-3 rounded-[var(--radius)] shadow-sm pointer-events-none">
-          <p className="text-xs font-medium text-[var(--text-primary)] mb-1 flex items-center gap-2"><Share2 size={12}/> Interactive Mind Map</p>
-          <p className="text-[10px] text-[var(--text-secondary)]">Click a node to ask the AI, or use toggles to expand.</p>
+       <div className="absolute top-4 left-4 z-10 bg-[var(--bg-elevated)] border border-[var(--border)] p-3 rounded-[var(--radius)] shadow-sm">
+          <div className="flex items-center justify-between gap-4">
+            <p className="text-xs font-medium text-[var(--text-primary)] flex items-center gap-2"><Share2 size={12}/> Interactive Mind Map</p>
+            <button
+              onClick={() => handleGenerate(true)}
+              disabled={generating}
+              className="text-[11px] font-medium text-[var(--accent-purple)] hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-50"
+            >
+              {generating ? <Loader2 size={12} className="animate-spin" /> : null}
+              {generating ? 'Regenerating...' : 'Regenerate'}
+            </button>
+          </div>
+          <p className="text-[10px] text-[var(--text-secondary)] mt-1">Click a node to ask the AI, or use toggles to expand.</p>
        </div>
        
        {/* Detail Card Overlay */}
