@@ -1,10 +1,76 @@
 import json
+import logging
 import os
 import re
 from datetime import datetime, timedelta
 from typing import Any
 
+import httpx
+import postgrest
+from postgrest._sync.request_builder import SyncQueryRequestBuilder
+from postgrest.utils import SyncClient
 from supabase import create_client, Client
+
+logger = logging.getLogger(__name__)
+
+# Configure PostgREST client to use HTTP/1.1 instead of HTTP/2.
+# Supabase/Cloudflare edge proxies terminate idle HTTP/2 connections after ~60s of inactivity (GOAWAY frame),
+# which causes httpx to raise RemoteProtocolError(<ConnectionTerminated ...>).
+# With HTTP/1.1, connection pooling gracefully discards stale/closed sockets and reconnects transparently.
+_orig_postgrest_create_session = postgrest.SyncPostgrestClient.create_session
+
+
+def _http1_postgrest_create_session(
+    self,
+    base_url: str,
+    headers: dict[str, str],
+    timeout: Any,
+    verify: bool = True,
+    proxy: str | None = None,
+) -> SyncClient:
+    return SyncClient(
+        base_url=base_url,
+        headers=headers,
+        timeout=timeout,
+        verify=verify,
+        proxy=proxy,
+        follow_redirects=True,
+        http2=False,
+    )
+
+
+postgrest.SyncPostgrestClient.create_session = _http1_postgrest_create_session
+
+# Resilient single-retry wrapper for safe (idempotent) read operations on transient socket/transport drops
+_orig_query_execute = SyncQueryRequestBuilder.execute
+
+SAFE_RETRY_METHODS = {"GET", "HEAD"}
+TRANSIENT_ERRORS = (httpx.RemoteProtocolError, httpx.ConnectError, httpx.ReadTimeout, httpx.PoolTimeout)
+
+
+def _resilient_query_execute(self):
+    try:
+        return _orig_query_execute(self)
+    except TRANSIENT_ERRORS as exc:
+        method = getattr(self, "http_method", "UNKNOWN")
+        if method in SAFE_RETRY_METHODS:
+            logger.warning(
+                "Transient PostgREST transport error on %s query (%s: %s). Retrying once...",
+                method,
+                type(exc).__name__,
+                exc,
+            )
+            return _orig_query_execute(self)
+        logger.warning(
+            "Transient PostgREST transport error on non-idempotent %s mutation (%s: %s). Not retrying to prevent duplicate mutations.",
+            method,
+            type(exc).__name__,
+            exc,
+        )
+        raise exc
+
+
+SyncQueryRequestBuilder.execute = _resilient_query_execute
 
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
