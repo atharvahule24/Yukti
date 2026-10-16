@@ -204,6 +204,53 @@ def generate_graph_task(self, session_id, force=False):
         gc.collect()
 
 
+def normalize_and_validate_notes(raw_notes):
+    """
+    Normalizes extracted notes from various possible LLM response shapes
+    ({"points": [...]}, {"notes": [...]}, {"key_concepts": [...]}, {"cards": [...]}, or raw list)
+    into standard {"points": [ {"bullet": ..., "explanation": ..., "example": ..., "importance": ...} ]}.
+    Raises ValueError if no valid note items are found.
+    """
+    candidates = None
+    if isinstance(raw_notes, list):
+        candidates = raw_notes
+    elif isinstance(raw_notes, dict):
+        for key in ("points", "notes", "key_concepts", "cards", "concepts", "items"):
+            val = raw_notes.get(key)
+            if isinstance(val, list):
+                candidates = val
+                break
+        if candidates is None and "bullet" in raw_notes and "explanation" in raw_notes:
+            candidates = [raw_notes]
+
+    if not candidates or not isinstance(candidates, list):
+        raise ValueError("Failed to extract valid notes from LLM response: missing or invalid notes array.")
+
+    valid_points = []
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        bullet = str(item.get("bullet") or item.get("title") or item.get("concept") or "").strip()
+        explanation = str(item.get("explanation") or item.get("description") or item.get("content") or "").strip()
+        example = str(item.get("example") or "").strip()
+        importance = str(item.get("importance") or "medium").strip().lower()
+        if importance not in ("high", "medium", "low"):
+            importance = "medium"
+
+        if bullet and explanation:
+            valid_points.append({
+                "bullet": bullet,
+                "explanation": explanation,
+                "example": example,
+                "importance": importance,
+            })
+
+    if not valid_points:
+        raise ValueError("Failed to extract valid notes from LLM response: no valid note points found.")
+
+    return {"points": valid_points}
+
+
 @celery_app.celery.task(bind=True, name="tasks.generate_notes")
 def generate_notes_task(self, session_id):
     try:
@@ -215,20 +262,46 @@ def generate_notes_task(self, session_id):
         if not session:
             raise ValueError(f"Session {session_id} not found.")
 
+        existing_notes = session.get("notes")
+        has_valid_notes = isinstance(existing_notes, dict) and bool(existing_notes.get("points"))
+
         self.update_state(state="PROGRESS", meta={"stage": "Generating Notes..."})
         full_text = session.get("full_text", "")[:6000]
         if not full_text:
             raise ValueError("No text found for session")
 
-        generator = Generator(json_mode=True)
-        res = generator.chain.invoke({"context": full_text, "question": NOTES_PROMPT})
-        notes = extract_json(res)
-        
-        if notes:
-            session["notes"] = notes
-            session_store[session_id] = session
-            
-        return notes or {"points": []}
+        try:
+            generator = Generator(json_mode=True)
+            res = generator.chain.invoke({"context": full_text, "question": NOTES_PROMPT})
+        except Exception as llm_err:
+            err_str = str(llm_err)
+            if "429" in err_str or "rate_limit" in err_str.lower() or "tpd" in err_str.lower():
+                import re
+                m = re.search(r"Please try again in ([^,;]+?s\b)", err_str)
+                cooldown_hint = f" Please try again in {m.group(1)}." if m else " Please wait a few minutes before retrying."
+                raise RuntimeError(
+                    f"Groq API rate limit reached (daily token limit exceeded).{cooldown_hint}"
+                ) from llm_err
+            raise
+
+        raw_notes = extract_json(res)
+        if not raw_notes:
+            if has_valid_notes:
+                print(f"Extraction returned invalid notes; preserving existing valid notes for session {session_id}.")
+                return existing_notes
+            raise ValueError("Failed to extract valid notes from LLM response: response was not valid JSON.")
+
+        try:
+            normalized_notes = normalize_and_validate_notes(raw_notes)
+        except ValueError:
+            if has_valid_notes:
+                print(f"Extraction returned invalid notes; preserving existing valid notes for session {session_id}.")
+                return existing_notes
+            raise
+
+        session["notes"] = normalized_notes
+        session_store[session_id] = session
+        return normalized_notes
 
     except Exception as e:
         raise

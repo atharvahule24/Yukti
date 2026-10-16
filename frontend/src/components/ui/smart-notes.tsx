@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { getNotes, generateNotes, getFact, getTaskStatus, TaskTerminalError, isTransientNetworkError } from '../../lib/api'
-import { Loader2, FileText, ChevronRight, X } from 'lucide-react'
+import { Loader2, FileText, ChevronRight, X, AlertCircle } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { toast } from 'sonner'
 
 type Note = {
 bullet: string
@@ -16,6 +17,15 @@ const [loading, setLoading] = useState(true)
 const [generating, setGenerating] = useState(false)
 const [fact, setFact] = useState('')
 const [selectedNote, setSelectedNote] = useState<Note | null>(null)
+const [errorMessage, setErrorMessage] = useState<string | null>(null)
+const isMountedRef = useRef(true)
+
+useEffect(() => {
+isMountedRef.current = true
+return () => {
+isMountedRef.current = false
+}
+}, [])
 
 useEffect(() => {
 if (!sessionId) return
@@ -27,14 +37,14 @@ try {
 const data = await getNotes(sessionId)
 const pts = Array.isArray(data) ? data : data.points || []
 
-if (!cancelled) {
+if (!cancelled && isMountedRef.current) {
 setNotes(pts)
 setLoading(false)
 }
 } catch (error) {
 console.error('Notes loading error:', error)
 
-if (!cancelled) {
+if (!cancelled && isMountedRef.current) {
 setLoading(false)
 }
 }
@@ -48,13 +58,16 @@ cancelled = true
 }, [sessionId])
 
 const handleGenerate = async () => {
-if (!sessionId) return
+if (!sessionId || generating) return
 
 setGenerating(true)
+setErrorMessage(null)
 
 try {
 getFact(sessionId)
-.then(res => setFact(res.fact))
+.then(res => {
+  if (isMountedRef.current) setFact(res.fact)
+})
 .catch(() => {})
 
 const task = await generateNotes(sessionId)
@@ -65,6 +78,8 @@ let consecutiveErrors = 0
 const maxConsecutiveErrors = 3
 
 while (attempts < maxAttempts) {
+  if (!isMountedRef.current) break
+
   try {
     const status = await getTaskStatus(task.task_id)
     consecutiveErrors = 0
@@ -73,8 +88,10 @@ while (attempts < maxAttempts) {
       const data = await getNotes(sessionId)
       const pts = Array.isArray(data) ? data : data.points || []
 
-      setNotes(pts)
-      setLoading(false)
+      if (isMountedRef.current) {
+        setNotes(pts)
+        setLoading(false)
+      }
       break
     }
 
@@ -92,18 +109,43 @@ while (attempts < maxAttempts) {
     await new Promise(r => setTimeout(r, 1000))
   }
 
-  await new Promise(resolve => setTimeout(resolve, 1000))
+  await new Promise(resolve => setTimeout(resolve, 2000))
   attempts++
 }
 
 if (attempts >= maxAttempts) {
-throw new Error('Notes generation timed out')
+throw new Error('Notes generation timed out. Please try again.')
 }
 
-} catch (e) {
+} catch (e: any) {
 console.error('Notes generation error:', e)
+const rawMsg = e?.message || (typeof e === 'string' ? e : 'Notes generation failed. Please try again.')
+
+let displayMsg = rawMsg
+if (
+  rawMsg.includes('429') ||
+  rawMsg.toLowerCase().includes('rate limit') ||
+  rawMsg.toLowerCase().includes('token limit') ||
+  rawMsg.toLowerCase().includes('quota')
+) {
+  displayMsg = rawMsg.includes('Groq API rate limit reached')
+    ? rawMsg
+    : 'AI daily token rate limit reached. Please wait a few minutes before retrying.'
+  toast.error(displayMsg, {
+    duration: 8000,
+    description: 'The AI service has reached its daily free quota limit. Please avoid repeated retries to allow the cooldown to complete.',
+  })
+} else {
+  toast.error(displayMsg)
+}
+
+if (isMountedRef.current) {
+  setErrorMessage(displayMsg)
+}
 } finally {
-setGenerating(false)
+if (isMountedRef.current) {
+  setGenerating(false)
+}
 }
 }
 
@@ -128,11 +170,18 @@ return (
 <div className="flex flex-col items-center justify-center p-8 bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] h-[500px]">
 <h3 className="text-xl font-bold mb-4 text-[var(--text-primary)]">Smart Notes</h3>
 <p className="text-sm text-[var(--text-secondary)] mb-6 text-center max-w-sm">Generate bite-sized, sticky-note style summaries of the key concepts from your material.</p>
+{errorMessage && (
+<div className="max-w-sm w-full mb-6 p-3 bg-red-500/10 border border-red-500/30 rounded-[var(--radius)] flex items-start gap-2.5 text-left">
+<AlertCircle size={18} className="text-red-400 shrink-0 mt-0.5" />
+<p className="text-xs text-red-200 leading-relaxed">{errorMessage}</p>
+</div>
+)}
 <button
 onClick={handleGenerate}
-className="w-full max-w-sm flex items-center justify-center gap-2 bg-[var(--accent-purple)] text-white py-3 rounded-[var(--radius)] font-bold hover:opacity-90 transition-all"
+disabled={generating}
+className="w-full max-w-sm flex items-center justify-center gap-2 bg-[var(--accent-purple)] text-white py-3 rounded-[var(--radius)] font-bold hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
 >
-<FileText size={18} /> Generate Notes
+<FileText size={18} /> {errorMessage ? 'Retry Generating Notes' : 'Generate Notes'}
 </button>
 </div>
 )
