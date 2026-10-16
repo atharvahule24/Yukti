@@ -3,7 +3,7 @@ import { getGraph, getFact } from '../../lib/api'
 import type { Node, Link } from '../../lib/api'
 import ForceGraph2D from 'react-force-graph-2d'
 import type { ForceGraphMethods, LinkObject, NodeObject } from 'react-force-graph-2d'
-import { Loader2, Share2, X } from 'lucide-react'
+import { Loader2, Share2, X, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
 
 // Extended node type for styling
@@ -40,6 +40,8 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
   const [generating, setGenerating] = useState(false)
   const [fact, setFact] = useState('')
   const [selectedNode, setSelectedNode] = useState<StyledNode | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const isMountedRef = useRef(true)
   const fgRef = useRef<GraphMethods | undefined>(undefined)
 
   useEffect(() => {
@@ -62,6 +64,13 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
       })
       .catch(() => setLoading(false))
   }, [sessionId])
+
+  useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
 
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set())
 
@@ -227,8 +236,11 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
   const handleGenerate = async (force = false) => {
     if (!sessionId || generating) return
     setGenerating(true)
+    setErrorMessage(null)
     try {
-      getFact(sessionId).then(res => setFact(res.fact)).catch(() => {})
+      getFact(sessionId).then(res => {
+        if (isMountedRef.current) setFact(res.fact)
+      }).catch(() => {})
       const { generateGraph, getTaskStatus, getGraph, TaskTerminalError, isTransientNetworkError } = await import('../../lib/api')
       const task = await generateGraph(sessionId, force) as any
       
@@ -244,10 +256,10 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
             consecutiveErrors = 0
             if (status.state === 'SUCCESS' || status.state === 'success') {
               const data = await getGraph(sessionId)
-              if (data.nodes.length > 0) {
+              if (data.nodes.length > 0 && isMountedRef.current) {
                 setExpandedNodes(new Set(data.nodes.map(n => n.id)))
               }
-              setGraphData(data)
+              if (isMountedRef.current) setGraphData(data)
               fgRef.current?.zoomToFit(400)
               break
             }
@@ -271,18 +283,19 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
           throw new Error('Mind Map generation timed out. Please try again.')
         }
       } else {
-        if (task.nodes && task.nodes.length > 0) {
+        if (task.nodes && task.nodes.length > 0 && isMountedRef.current) {
           setExpandedNodes(new Set(task.nodes.map((n: any) => n.id)))
         }
-        setGraphData(task)
+        if (isMountedRef.current) setGraphData(task)
         fgRef.current?.zoomToFit(400)
       }
     } catch (e: any) {
       console.error(e)
       const message = e?.message || 'Mind Map generation failed. Please try again.'
       toast.error(message)
+      if (isMountedRef.current) setErrorMessage(message)
     } finally {
-      setGenerating(false)
+      if (isMountedRef.current) setGenerating(false)
     }
   }
 
@@ -339,9 +352,16 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
       <div className="flex flex-col items-center justify-center p-8 bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] w-full max-w-sm mx-auto mt-12 h-[500px]">
         <h3 className="text-xl font-bold mb-4 text-[var(--text-primary)]">Knowledge Graph</h3>
         <p className="text-sm text-[var(--text-secondary)] mb-6 text-center">Generate a hierarchical mind map to visualize topics and subtopics from your material.</p>
+        {errorMessage && (
+          <div className="w-full max-w-sm mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-[var(--radius)] flex items-start gap-2 text-left">
+            <AlertCircle className="text-red-400 shrink-0 mt-0.5" size={16} />
+            <p className="text-xs text-red-200">{errorMessage}</p>
+          </div>
+        )}
         <button
           onClick={() => handleGenerate(true)}
-          className="w-full max-w-sm flex items-center justify-center gap-2 bg-[var(--accent-purple)] text-white py-3 rounded-[var(--radius)] font-bold hover:opacity-90 transition-all cursor-pointer"
+          disabled={generating}
+          className="w-full max-w-sm flex items-center justify-center gap-2 bg-[var(--accent-purple)] text-white py-3 rounded-[var(--radius)] font-bold hover:opacity-90 transition-all disabled:opacity-50 cursor-pointer"
         >
           <Share2 size={18} /> Generate Mind Map
         </button>

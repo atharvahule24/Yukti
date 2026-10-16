@@ -92,7 +92,15 @@ def is_rate_limit_error(exc: Exception) -> bool:
         or "rate_limit_exceeded" in exc_msg
         or "tokens per minute" in exc_msg
         or "tokens per day" in exc_msg
+        or "tpd" in exc_msg
     )
+
+
+def format_quiz_rate_limit_error(exc: Exception) -> str:
+    err_str = str(exc)
+    m = re.search(r"Please try again in ([^,;]+?s\b)", err_str)
+    cooldown = f" Please try again in {m.group(1)}." if m else " Please try again later."
+    return f"Quiz generation is temporarily unavailable because the AI provider's rate limit has been reached.{cooldown}"
 
 
 quiz_bp = Blueprint('quiz', __name__)
@@ -862,9 +870,7 @@ GENERATED QUESTION:
 
                                 except Exception as validation_error:
                                     if is_rate_limit_error(validation_error):
-                                        raise RuntimeError(
-                                            "Quiz generation is temporarily unavailable because the AI provider's rate limit has been reached. Please try again later."
-                                        )
+                                        raise RuntimeError(format_quiz_rate_limit_error(validation_error))
                                     print(
                                         "Grounding validation error:",
                                         repr(validation_error)
@@ -872,9 +878,7 @@ GENERATED QUESTION:
 
                 except Exception as e:
                     if is_rate_limit_error(e):
-                        raise RuntimeError(
-                            "Quiz generation is temporarily unavailable because the AI provider's rate limit has been reached. Please try again later."
-                        )
+                        raise RuntimeError(format_quiz_rate_limit_error(e))
                     print(
                         "Generation loop error:",
                         repr(e)

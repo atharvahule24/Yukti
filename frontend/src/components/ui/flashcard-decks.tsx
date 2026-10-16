@@ -1,14 +1,17 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { getFlashcards, generateFlashcards, rateFlashcard, getFact, getTaskStatus, TaskTerminalError, isTransientNetworkError } from '../../lib/api'
 import type { Flashcard } from '../../lib/api'
-import { Loader2, RotateCw, Check, X, SkipForward, BrainCircuit } from 'lucide-react'
+import { Loader2, RotateCw, Check, X, SkipForward, BrainCircuit, AlertCircle } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { toast } from 'sonner'
 
 export function FlashcardDecks({ sessionId }: { sessionId: string }) {
   const [cards, setCards] = useState<Flashcard[]>([])
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
   const [fact, setFact] = useState<string>('')
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const isMountedRef = useRef(true)
   
   // Review State
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -28,14 +31,24 @@ export function FlashcardDecks({ sessionId }: { sessionId: string }) {
   }, [sessionId])
 
   useEffect(() => {
+    isMountedRef.current = true
+    return () => {
+      isMountedRef.current = false
+    }
+  }, [])
+
+  useEffect(() => {
     setHintVisible(false)
   }, [currentIndex])
 
   const handleGenerate = async () => {
-    if (!sessionId) return
+    if (!sessionId || generating) return
     setGenerating(true)
+    setErrorMessage(null)
       try {
-        getFact(sessionId).then(res => setFact(res.fact)).catch(() => {})
+        getFact(sessionId).then(res => {
+          if (isMountedRef.current) setFact(res.fact)
+        }).catch(() => {})
         const task = await generateFlashcards(sessionId) as any
         
         let attempts = 0
@@ -50,7 +63,7 @@ export function FlashcardDecks({ sessionId }: { sessionId: string }) {
               consecutiveErrors = 0
               if (status.state === 'SUCCESS' || status.state === 'success') {
                 const data = await getFlashcards(sessionId)
-                setCards(data.cards || [])
+                if (isMountedRef.current) setCards(data.cards || [])
                 break
               }
               if (status.state === 'FAILURE' || status.state === 'failure' || status.state === 'REVOKED' || status.state === 'revoked') {
@@ -73,16 +86,21 @@ export function FlashcardDecks({ sessionId }: { sessionId: string }) {
             throw new Error("Flashcards generation timed out. Please try again.")
           }
         } else {
-          setCards(task.cards || [])
+          if (isMountedRef.current) setCards(task.cards || [])
         }
         
-        setCurrentIndex(0)
-      setCorrectCount(0)
-      setHintVisible(false)
-    } catch (e) {
+        if (isMountedRef.current) {
+          setCurrentIndex(0)
+          setCorrectCount(0)
+          setHintVisible(false)
+        }
+    } catch (e: any) {
       console.error(e)
+      const message = e?.message || "Flashcards generation failed. Please try again."
+      toast.error(message)
+      if (isMountedRef.current) setErrorMessage(message)
     } finally {
-      setGenerating(false)
+      if (isMountedRef.current) setGenerating(false)
     }
   }
 
@@ -139,9 +157,16 @@ export function FlashcardDecks({ sessionId }: { sessionId: string }) {
       <div className="flex flex-col items-center justify-center p-8 bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] w-full h-[500px]">
         <h3 className="text-xl font-bold mb-4 text-[var(--text-primary)]">Flashcard Deck</h3>
         <p className="text-sm text-[var(--text-secondary)] mb-6 text-center max-w-sm">We'll generate a deck of about 20 intelligent flashcards to test your active recall on this material.</p>
+        {errorMessage && (
+          <div className="w-full max-w-sm mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-[var(--radius)] flex items-start gap-2 text-left">
+            <AlertCircle className="text-red-400 shrink-0 mt-0.5" size={16} />
+            <p className="text-xs text-red-200">{errorMessage}</p>
+          </div>
+        )}
         <button
           onClick={handleGenerate}
-          className="w-full max-w-sm flex items-center justify-center gap-2 bg-[var(--accent-purple)] text-white py-3 rounded-[var(--radius)] font-bold hover:opacity-90 transition-all"
+          disabled={generating}
+          className="w-full max-w-sm flex items-center justify-center gap-2 bg-[var(--accent-purple)] text-white py-3 rounded-[var(--radius)] font-bold hover:opacity-90 transition-all disabled:opacity-50 cursor-pointer"
         >
           <BrainCircuit size={18} /> Generate Flashcards
         </button>

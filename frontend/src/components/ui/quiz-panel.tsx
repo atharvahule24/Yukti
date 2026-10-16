@@ -1,13 +1,16 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { getQuiz, generateQuiz, getFact, gradeAnswer,
 recordMetacognitiveCheckin,generateReassessment,getVideoRecommendation,} from '../../lib/api'
 import type { GradeResult, MCQ, ShortAnswer } from '../../lib/api'
-import { Loader2, CheckCircle2, XCircle, ChevronRight, HelpCircle, MessageSquare } from 'lucide-react'
+import { Loader2, CheckCircle2, XCircle, ChevronRight, HelpCircle, MessageSquare, AlertCircle } from 'lucide-react'
+import { toast } from 'sonner'
 
 export function QuizPanel({ sessionId }: { sessionId: string }) {
 const [mcq, setMcq] = useState<MCQ[]>([])
 const [sa, setSa] = useState<ShortAnswer[]>([])
 const [loading, setLoading] = useState(true)
+const [errorMessage, setErrorMessage] = useState<string | null>(null)
+const isMountedRef = useRef(true)
 
 // MCQ State
 const [mcqAnswers, setMcqAnswers] = useState<Record<string, number>>({})
@@ -85,14 +88,25 @@ handleInterventionResult
 }
 }, [])
 
+useEffect(() => {
+isMountedRef.current = true
+return () => {
+isMountedRef.current = false
+}
+}, [])
+
 const handleGenerate = async () => {
-if (!sessionId) return
+if (!sessionId || generating) return
 setGenerating(true)
+setErrorMessage(null)
 try {
 // Get fact first to show while generating
-getFact(sessionId).then(res => setFact(res.fact)).catch(() => {})
+getFact(sessionId).then(res => {
+if (isMountedRef.current) setFact(res.fact)
+}).catch(() => {})
 
 const data = await generateQuiz(sessionId, options)
+if (isMountedRef.current) {
 setMcq(data.mcq || [])
 setSa(data.short_answer || [])
 setCurrentQuestionIndex(0)
@@ -100,10 +114,18 @@ setMcqAnswers({})
 setShortAnswers({})
 setGradingResults({})
 setShowHint(false)
-} catch (e) {
+}
+} catch (e: any) {
 console.error(e)
+const message = e?.message || e?.error || 'Failed to generate quiz. Please try again.'
+toast.error(message)
+if (isMountedRef.current) {
+setErrorMessage(message)
+}
 } finally {
+if (isMountedRef.current) {
 setGenerating(false)
+}
 }
 }
 
@@ -223,8 +245,17 @@ className="w-full p-2 bg-[var(--bg-base)] border border-[var(--border)] rounded-
 </div>
 </div>
 
+{errorMessage && (
+<div className="w-full max-w-sm mb-4 p-3 bg-red-500/10 border border-red-500/20 rounded-[var(--radius)] flex items-start gap-2 text-left">
+<AlertCircle className="text-red-400 shrink-0 mt-0.5" size={16} />
+<p className="text-xs text-red-200">{errorMessage}</p>
+</div>
+)}
+
 <button
 onClick={handleGenerate}
+disabled={generating}
+className="px-6 py-2.5 bg-[var(--accent-purple)] text-white rounded-[var(--radius)] font-medium hover:opacity-90 transition-all disabled:opacity-50 cursor-pointer"
 >
 Generate Quiz
 </button>

@@ -181,7 +181,7 @@ Text:
 
     except Exception as e:
         print(f"Error in single-pass knowledge graph extraction: {e}")
-        return {"nodes": [], "edges": [], "links": []}
+        raise
 
 def merge_graph(file_path, new_graph):
     # Load existing

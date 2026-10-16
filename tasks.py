@@ -180,8 +180,19 @@ def generate_graph_task(self, session_id, force=False):
         else:
             sampled_text = full_text
 
-        # Single logical LLM pass directly on sampled context
-        graph_data = extract_knowledge_graph(sampled_text) or {"nodes": [], "edges": [], "links": []}
+        try:
+            # Single logical LLM pass directly on sampled context
+            graph_data = extract_knowledge_graph(sampled_text) or {"nodes": [], "edges": [], "links": []}
+        except Exception as llm_err:
+            err_str = str(llm_err)
+            if "429" in err_str or "rate_limit" in err_str.lower() or "tpd" in err_str.lower():
+                import re
+                m = re.search(r"Please try again in ([^,;]+?s\b)", err_str)
+                cooldown_hint = f" Please try again in {m.group(1)}." if m else " Please wait a few minutes before retrying."
+                raise RuntimeError(
+                    f"Groq API rate limit reached (daily token limit exceeded).{cooldown_hint}"
+                ) from llm_err
+            raise
 
         if "edges" in graph_data and "links" not in graph_data:
             graph_data["links"] = graph_data.pop("edges")
@@ -189,9 +200,11 @@ def generate_graph_task(self, session_id, force=False):
             graph_data["edges"] = graph_data.get("links", [])
 
         # Prevent overwriting an existing valid graph with a failed or empty extraction
-        if not _is_valid_graph(graph_data) and has_valid_graph:
-            print(f"Extraction returned invalid graph; preserving existing valid graph for session {session_id}.")
-            return existing_graph
+        if not _is_valid_graph(graph_data):
+            if has_valid_graph:
+                print(f"Extraction returned invalid graph; preserving existing valid graph for session {session_id}.")
+                return existing_graph
+            raise ValueError("Failed to extract a valid knowledge graph from document text: no concepts or links found.")
             
         session["graph"] = graph_data
         session_store[session_id] = session
@@ -310,6 +323,50 @@ def generate_notes_task(self, session_id):
         gc.collect()
 
 
+def normalize_and_validate_flashcards(raw_flashcards):
+    """
+    Normalizes extracted flashcards from various possible LLM response shapes
+    ({"cards": [...]}, {"flashcards": [...]}, {"deck": [...]}, or raw list)
+    into standard {"cards": [ {"id": ..., "front": ..., "back": ..., "explanation": ..., "hint": ...} ]}.
+    Raises ValueError if no valid cards are found.
+    """
+    candidates = None
+    if isinstance(raw_flashcards, list):
+        candidates = raw_flashcards
+    elif isinstance(raw_flashcards, dict):
+        for key in ("cards", "flashcards", "deck", "items"):
+            val = raw_flashcards.get(key)
+            if isinstance(val, list):
+                candidates = val
+                break
+
+    if not candidates or not isinstance(candidates, list):
+        raise ValueError("Failed to extract valid flashcards from LLM response: missing or invalid cards array.")
+
+    valid_cards = []
+    for i, item in enumerate(candidates):
+        if not isinstance(item, dict):
+            continue
+        front = str(item.get("front") or item.get("question") or "").strip()
+        back = str(item.get("back") or item.get("answer") or "").strip()
+        explanation = str(item.get("explanation") or "").strip()
+        hint = str(item.get("hint") or "").strip()
+
+        if front and back:
+            valid_cards.append({
+                "id": f"card_{i}",
+                "front": front,
+                "back": back,
+                "explanation": explanation,
+                "hint": hint,
+            })
+
+    if not valid_cards:
+        raise ValueError("Failed to extract valid flashcards from LLM response: no valid cards found.")
+
+    return {"cards": valid_cards}
+
+
 @celery_app.celery.task(bind=True, name="tasks.generate_flashcards")
 def generate_flashcards_task(self, session_id):
     try:
@@ -323,30 +380,60 @@ def generate_flashcards_task(self, session_id):
         if not session:
             raise ValueError(f"Session {session_id} not found.")
 
+        existing_flashcards = session.get("flashcards")
+        has_valid_flashcards = isinstance(existing_flashcards, dict) and bool(existing_flashcards.get("cards"))
+
         self.update_state(state="PROGRESS", meta={"stage": "Generating Flashcards..."})
         full_text = session.get("full_text", "")[:6000]
         if not full_text:
             raise ValueError("No text found for session")
 
-        generator = Generator(json_mode=True)
-        res = generator.chain.invoke({"context": full_text, "question": FLASHCARD_GENERATION_PROMPT})
-        flashcards = extract_json(res)
-        
-        if flashcards:
-            for i, c in enumerate(flashcards.get("cards", [])):
-                c["id"] = f"card_{i}"
-                upsert_card_schedule(
-                    session_id=session_id,
-                    card_id=f"card_{i}",
-                    front=c.get("front", ""),
-                    next_review=datetime.utcnow().isoformat()
-                )
-            upsert_flashcard_progress(session_id, len(flashcards.get("cards", [])), 0)
-            
-            session["flashcards"] = flashcards
-            session_store[session_id] = session
+        try:
+            generator = Generator(json_mode=True)
+            res = generator.chain.invoke({"context": full_text, "question": FLASHCARD_GENERATION_PROMPT})
+        except Exception as llm_err:
+            err_str = str(llm_err)
+            if "429" in err_str or "rate_limit" in err_str.lower() or "tpd" in err_str.lower():
+                import re
+                m = re.search(r"Please try again in ([^,;]+?s\b)", err_str)
+                cooldown_hint = f" Please try again in {m.group(1)}." if m else " Please wait a few minutes before retrying."
+                raise RuntimeError(
+                    f"Groq API rate limit reached (daily token limit exceeded).{cooldown_hint}"
+                ) from llm_err
+            if has_valid_flashcards:
+                print(f"Extraction raised error; preserving existing valid cards for session {session_id}.")
+                return existing_flashcards
+            raise
 
-        return flashcards or {"cards": []}
+        raw_flashcards = extract_json(res)
+        if not raw_flashcards:
+            if has_valid_flashcards:
+                print(f"Extraction returned invalid flashcards; preserving existing valid cards for session {session_id}.")
+                return existing_flashcards
+            raise ValueError("Failed to extract valid flashcards from LLM response: response was not valid JSON.")
+
+        try:
+            normalized_flashcards = normalize_and_validate_flashcards(raw_flashcards)
+        except ValueError:
+            if has_valid_flashcards:
+                print(f"Extraction returned invalid flashcards; preserving existing valid cards for session {session_id}.")
+                return existing_flashcards
+            raise
+
+        cards_list = normalized_flashcards["cards"]
+        for c in cards_list:
+            upsert_card_schedule(
+                session_id=session_id,
+                card_id=c["id"],
+                front=c.get("front", ""),
+                next_review=datetime.utcnow().isoformat()
+            )
+        upsert_flashcard_progress(session_id, len(cards_list), 0)
+        
+        session["flashcards"] = normalized_flashcards
+        session_store[session_id] = session
+
+        return normalized_flashcards
 
     except Exception as e:
         raise
