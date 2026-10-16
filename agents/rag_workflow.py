@@ -14,6 +14,130 @@ from agents.prompts import (
     EXAM_PREP_SYSTEM
 )
 
+def deduplicate_and_budget_chunks(
+    docs: list,
+    max_chunks: int = 4,
+    max_total_chars: int = 4000,
+) -> list:
+    """
+    Filters retrieved document chunks by removing duplicates and redundant chunks,
+    and limiting the total context to a measured character/chunk budget.
+
+    Individual chunks are NEVER truncated mid-chunk to prevent loss of factual evidence.
+    """
+    if not docs:
+        return []
+
+    selected = []
+    seen_normalized = []
+    total_chars = 0
+
+    for doc in docs:
+        content = (getattr(doc, "page_content", "") or "").strip()
+        if not content:
+            continue
+
+        norm = " ".join(content.split()).lower()
+
+        # Check for duplicates or near-duplicates
+        is_redundant = False
+        for seen in seen_normalized:
+            if norm == seen or norm in seen:
+                is_redundant = True
+                break
+            if len(norm) > 80 and len(seen) > 80:
+                if seen in norm and (len(seen) / len(norm) > 0.85):
+                    is_redundant = True
+                    break
+
+        if is_redundant:
+            continue
+
+        chunk_len = len(content)
+
+        # Budget enforcement:
+        # If we already have selected chunk(s) and adding this one exceeds budget or chunk count, stop.
+        # The very first selected chunk is ALWAYS kept intact even if it exceeds max_total_chars on its own.
+        if selected and (total_chars + chunk_len > max_total_chars or len(selected) >= max_chunks):
+            break
+
+        selected.append(doc)
+        seen_normalized.append(norm)
+        total_chars += chunk_len
+
+        if len(selected) >= max_chunks:
+            break
+
+    return selected
+
+
+def prune_chat_history(
+    history: list[dict],
+    max_messages: int = 8,
+    max_total_chars: int = 2500,
+) -> list[dict]:
+    """
+    Prunes chat history to fit within a measured message and character budget,
+    keeping conversational context while preventing prompt token explosion.
+    Preserves opening question if available, plus the most recent turns.
+    """
+    if not history:
+        return []
+
+    # 1. Filter consecutive duplicates and invalid roles
+    valid = []
+    last_role = None
+    last_content = None
+    for item in history:
+        role = item.get("role")
+        content = item.get("content")
+        if role in {"user", "assistant"} and content:
+            if role == last_role and content == last_content:
+                continue
+            last_role = role
+            last_content = content
+            valid.append({"role": role, "content": content})
+
+    if not valid:
+        return []
+
+    if len(valid) <= max_messages:
+        total_len = sum(len(m["content"]) for m in valid)
+        if total_len <= max_total_chars:
+            return valid
+
+    # If history exceeds message limit or char budget:
+    # Anchor the first message if it's from user
+    anchor = None
+    remaining = valid
+    remaining_budget = max_total_chars
+    remaining_msg_slots = max_messages
+
+    if valid and valid[0]["role"] == "user":
+        first_len = len(valid[0]["content"])
+        if first_len < max_total_chars // 2:
+            anchor = valid[0]
+            remaining = valid[1:]
+            remaining_budget -= first_len
+            remaining_msg_slots -= 1
+
+    recent_candidates = remaining[-remaining_msg_slots:] if remaining_msg_slots > 0 else []
+    selected_recent = []
+    current_chars = 0
+    for item in reversed(recent_candidates):
+        item_len = len(item["content"])
+        if selected_recent and (current_chars + item_len > remaining_budget):
+            break
+        selected_recent.append(item)
+        current_chars += item_len
+
+    selected_recent = list(reversed(selected_recent))
+
+    if anchor:
+        return [anchor] + selected_recent
+    return selected_recent
+
+
 class RagWorkflow:
     def __init__(self):
         self.groq_api_key = os.environ.get("GROQ_API_KEY")
@@ -47,11 +171,13 @@ class RagWorkflow:
         # but FAISS doesn't easily filter by metadata in all LangChain versions unless set up.
         # Here we just search the vector store directly with metadata filtering if possible.
         try:
-            # We fetch more docs and rerank/filter by session_id if needed, or assume global store for now
-            # as per standard simplified setup, if filtering by session_id isn't explicitly supported in existing code.
-            # We'll fetch top 5.
             self.vector_store.load(self.embedder.model)
-            docs = self.vector_store.search(message, k=10, session_id=session_id)
+            raw_docs = self.vector_store.search(message, k=5, session_id=session_id)
+            docs = deduplicate_and_budget_chunks(
+                raw_docs,
+                max_chunks=4,
+                max_total_chars=4000,
+            )
 
             context_parts = []
 
@@ -60,7 +186,11 @@ class RagWorkflow:
                 raw_page = metadata.get("page")
 
                 # PDF loader pages are zero-based; display pages as one-based.
-                page = raw_page + 1 if isinstance(raw_page, int) else "Unknown"
+                page = (
+                    raw_page + 1
+                    if isinstance(raw_page, int) and not isinstance(raw_page, bool)
+                    else "Unknown"
+                )
 
                 context_parts.append(
                     f"[SOURCE {i} | PDF PAGE {page}]\n"
@@ -77,6 +207,11 @@ class RagWorkflow:
         system_prompt = self._get_system_prompt(mode)
 
         history = get_history(session_id, limit=16) if session_id else []
+        pruned_history = prune_chat_history(
+            history,
+            max_messages=8,
+            max_total_chars=2500,
+        )
 
         rag_system_prompt = system_prompt + """
 
@@ -111,22 +246,12 @@ Retrieved study material:
 {context}
 """
 
-        history_messages = []
-        last_role = None
-        last_content = None
-        for item in history:
-            role = item.get("role")
-            content = item.get("content")
-            if role in {"user", "assistant"}:
-                if role == last_role and content == last_content:
-                    continue
-                last_role = role
-                last_content = content
-                history_messages.append(
-                    HumanMessage(content=content)
-                    if role == "user"
-                    else AIMessage(content=content)
-                )
+        history_messages = [
+            HumanMessage(content=item["content"])
+            if item["role"] == "user"
+            else AIMessage(content=item["content"])
+            for item in pruned_history
+        ]
 
         prompt = ChatPromptTemplate.from_messages([
             ("system", rag_system_prompt),
