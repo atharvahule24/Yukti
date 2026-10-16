@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getNotes, generateNotes, getFact, getTaskStatus } from '../../lib/api'
+import { getNotes, generateNotes, getFact, getTaskStatus, TaskTerminalError, isTransientNetworkError } from '../../lib/api'
 import { Loader2, FileText, ChevronRight, X } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 
@@ -61,26 +61,39 @@ const task = await generateNotes(sessionId)
 
 let attempts = 0
 const maxAttempts = 60
+let consecutiveErrors = 0
+const maxConsecutiveErrors = 3
 
 while (attempts < maxAttempts) {
-const status = await getTaskStatus(task.task_id)
+  try {
+    const status = await getTaskStatus(task.task_id)
+    consecutiveErrors = 0
 
-if (status.state === 'SUCCESS' || status.state === 'success') {
-const data = await getNotes(sessionId)
-const pts = Array.isArray(data) ? data : data.points || []
+    if (status.state === 'SUCCESS' || status.state === 'success') {
+      const data = await getNotes(sessionId)
+      const pts = Array.isArray(data) ? data : data.points || []
 
-setNotes(pts)
-setLoading(false)
+      setNotes(pts)
+      setLoading(false)
+      break
+    }
 
-break
-}
+    if (status.state === 'FAILURE' || status.state === 'failure' || status.state === 'REVOKED' || status.state === 'revoked') {
+      throw new TaskTerminalError(status.error || 'Notes generation failed')
+    }
+  } catch (pollErr: unknown) {
+    if (pollErr instanceof TaskTerminalError || !isTransientNetworkError(pollErr)) {
+      throw pollErr
+    }
+    consecutiveErrors++
+    if (consecutiveErrors >= maxConsecutiveErrors) {
+      throw new Error('Server connection interrupted. Please try again.')
+    }
+    await new Promise(r => setTimeout(r, 1000))
+  }
 
-if (status.state === 'FAILURE' || status.state === 'failure') {
-throw new Error('Notes generation failed')
-}
-
-await new Promise(resolve => setTimeout(resolve, 1000))
-attempts++
+  await new Promise(resolve => setTimeout(resolve, 1000))
+  attempts++
 }
 
 if (attempts >= maxAttempts) {

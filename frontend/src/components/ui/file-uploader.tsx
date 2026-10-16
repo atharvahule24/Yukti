@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react'
 import { UploadCloud, Video as Youtube, File as FileIcon, X } from 'lucide-react'
-import { uploadFile, uploadYouTube, getTaskStatus } from '../../lib/api'
+import { uploadFile, uploadYouTube, getTaskStatus, TaskTerminalError, isTransientNetworkError } from '../../lib/api'
 import { toast } from 'sonner'
 import { motion } from 'framer-motion'
 
@@ -88,20 +88,34 @@ let taskResult = res
 if (res.task_id) {
   let attempts = 0
   const maxAttempts = 300
+  let consecutiveErrors = 0
+  const maxConsecutiveErrors = 3
 
   while (attempts < maxAttempts) {
-    const status = await getTaskStatus(res.task_id)
+    try {
+      const status = await getTaskStatus(res.task_id)
+      consecutiveErrors = 0
 
-    if (status.state === 'success') {
-      taskResult = {
-        ...res,
-        ...(status.result || {})
+      if (status.state === 'success' || status.state === 'SUCCESS') {
+        taskResult = {
+          ...res,
+          ...(status.result || {})
+        }
+        break
       }
-      break
-    }
 
-    if (status.state === 'failure') {
-      throw new Error(status.error || 'File processing failed')
+      if (status.state === 'failure' || status.state === 'FAILURE' || status.state === 'revoked' || status.state === 'REVOKED') {
+        throw new TaskTerminalError(status.error || 'File processing failed')
+      }
+    } catch (pollErr: unknown) {
+      if (pollErr instanceof TaskTerminalError || !isTransientNetworkError(pollErr)) {
+        throw pollErr
+      }
+      consecutiveErrors++
+      if (consecutiveErrors >= maxConsecutiveErrors) {
+        throw new Error('Server connection was interrupted. Please check your network or try again.')
+      }
+      await new Promise(resolve => setTimeout(resolve, 1000))
     }
 
     await new Promise(resolve => setTimeout(resolve, 1000))
@@ -132,7 +146,7 @@ setTimeout(() => {
     clearInterval(progInt)
     setProgress(0)
 
-    const message = err instanceof Error ? err.message : 'Upload failed'
+    const message = err instanceof Error ? err.message : ((err as any)?.message || 'Upload failed')
     toast.error(message)
     setIsUploading(false)
     isProcessingRef.current = false

@@ -229,29 +229,46 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
     setGenerating(true)
     try {
       getFact(sessionId).then(res => setFact(res.fact)).catch(() => {})
-      const { generateGraph, getTaskStatus, getGraph } = await import('../../lib/api')
+      const { generateGraph, getTaskStatus, getGraph, TaskTerminalError, isTransientNetworkError } = await import('../../lib/api')
       const task = await generateGraph(sessionId, force) as any
       
       let attempts = 0
       const maxAttempts = 60
+      let consecutiveErrors = 0
+      const maxConsecutiveErrors = 3
       
       if (task.task_id) {
         while (attempts < maxAttempts) {
-          const status = await getTaskStatus(task.task_id)
-          if (status.state === 'SUCCESS' || status.state === 'success') {
-            const data = await getGraph(sessionId)
-            if (data.nodes.length > 0) {
-              setExpandedNodes(new Set(data.nodes.map(n => n.id)))
+          try {
+            const status = await getTaskStatus(task.task_id)
+            consecutiveErrors = 0
+            if (status.state === 'SUCCESS' || status.state === 'success') {
+              const data = await getGraph(sessionId)
+              if (data.nodes.length > 0) {
+                setExpandedNodes(new Set(data.nodes.map(n => n.id)))
+              }
+              setGraphData(data)
+              fgRef.current?.zoomToFit(400)
+              break
             }
-            setGraphData(data)
-            fgRef.current?.zoomToFit(400)
-            break
-          }
-          if (status.state === 'FAILURE' || status.state === 'failure' || status.state === 'REVOKED' || status.state === 'revoked') {
-            throw new Error("Generation failed")
+            if (status.state === 'FAILURE' || status.state === 'failure' || status.state === 'REVOKED' || status.state === 'revoked') {
+              throw new TaskTerminalError(status.error || "Generation failed")
+            }
+          } catch (pollErr: unknown) {
+            if (pollErr instanceof TaskTerminalError || !isTransientNetworkError(pollErr)) {
+              throw pollErr
+            }
+            consecutiveErrors++
+            if (consecutiveErrors >= maxConsecutiveErrors) {
+              throw new Error("Server connection interrupted. Please try again.")
+            }
+            await new Promise(r => setTimeout(r, 1000))
           }
           await new Promise(r => setTimeout(r, 2000))
           attempts++
+        }
+        if (attempts >= maxAttempts) {
+          throw new Error('Mind Map generation timed out. Please try again.')
         }
       } else {
         if (task.nodes && task.nodes.length > 0) {
@@ -260,9 +277,10 @@ export function KnowledgeGraph({ sessionId }: { sessionId: string }) {
         setGraphData(task)
         fgRef.current?.zoomToFit(400)
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e)
-      toast.error('Mind Map generation failed. Please try again.')
+      const message = e?.message || 'Mind Map generation failed. Please try again.'
+      toast.error(message)
     } finally {
       setGenerating(false)
     }

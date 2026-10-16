@@ -118,6 +118,7 @@ async function handleResponse<T>(response: Response): Promise<T> {
     }
     throw {
       error: 'api_error',
+      status: response.status,
       message,
       ...(ambiguous_delivery !== undefined ? { ambiguous_delivery } : {}),
       ...(retry_after !== undefined ? { retry_after } : {}),
@@ -152,6 +153,27 @@ export async function uploadFile(file: File): Promise<{
   return handleResponse(response);
 }
 
+export class TaskTerminalError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'TaskTerminalError'
+  }
+}
+
+export function isTransientNetworkError(err: unknown): boolean {
+  if (err instanceof TaskTerminalError) {
+    return false
+  }
+  const status = (err as any)?.status
+  if (status === 502 || status === 503 || status === 504) {
+    return true
+  }
+  if ((err as any)?.name === 'TypeError') {
+    return true
+  }
+  return false
+}
+
 export async function getTaskStatus(taskId: string): Promise<{
   state: string;
   result?: {
@@ -161,8 +183,25 @@ export async function getTaskStatus(taskId: string): Promise<{
   };
   error?: string;
 }> {
-  const response = await apiFetch(`${BASE_URL}/task/${taskId}`)
-  return handleResponse(response)
+  let lastError: unknown
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await apiFetch(`${BASE_URL}/task/${taskId}`)
+      if ((response.status === 502 || response.status === 503 || response.status === 504) && attempt === 0) {
+        await new Promise(r => setTimeout(r, 500))
+        continue
+      }
+      return await handleResponse(response)
+    } catch (err: any) {
+      lastError = err
+      if (isTransientNetworkError(err) && attempt === 0) {
+        await new Promise(r => setTimeout(r, 500))
+        continue
+      }
+      throw err
+    }
+  }
+  throw lastError
 }
 
 export async function uploadYouTube(url: string): Promise<{

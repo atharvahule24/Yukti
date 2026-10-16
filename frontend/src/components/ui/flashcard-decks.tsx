@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { getFlashcards, generateFlashcards, rateFlashcard, getFact, getTaskStatus } from '../../lib/api'
+import { getFlashcards, generateFlashcards, rateFlashcard, getFact, getTaskStatus, TaskTerminalError, isTransientNetworkError } from '../../lib/api'
 import type { Flashcard } from '../../lib/api'
 import { Loader2, RotateCw, Check, X, SkipForward, BrainCircuit } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -40,20 +40,37 @@ export function FlashcardDecks({ sessionId }: { sessionId: string }) {
         
         let attempts = 0
         const maxAttempts = 60
+        let consecutiveErrors = 0
+        const maxConsecutiveErrors = 3
         
         if (task.task_id) {
           while (attempts < maxAttempts) {
-            const status = await getTaskStatus(task.task_id)
-            if (status.state === 'SUCCESS' || status.state === 'success') {
-              const data = await getFlashcards(sessionId)
-              setCards(data.cards || [])
-              break
-            }
-            if (status.state === 'FAILURE' || status.state === 'REVOKED') {
-              throw new Error("Generation failed")
+            try {
+              const status = await getTaskStatus(task.task_id)
+              consecutiveErrors = 0
+              if (status.state === 'SUCCESS' || status.state === 'success') {
+                const data = await getFlashcards(sessionId)
+                setCards(data.cards || [])
+                break
+              }
+              if (status.state === 'FAILURE' || status.state === 'failure' || status.state === 'REVOKED' || status.state === 'revoked') {
+                throw new TaskTerminalError(status.error || "Generation failed")
+              }
+            } catch (pollErr: unknown) {
+              if (pollErr instanceof TaskTerminalError || !isTransientNetworkError(pollErr)) {
+                throw pollErr
+              }
+              consecutiveErrors++
+              if (consecutiveErrors >= maxConsecutiveErrors) {
+                throw new Error("Server connection interrupted. Please try again.")
+              }
+              await new Promise(r => setTimeout(r, 1000))
             }
             await new Promise(r => setTimeout(r, 2000))
             attempts++
+          }
+          if (attempts >= maxAttempts) {
+            throw new Error("Flashcards generation timed out. Please try again.")
           }
         } else {
           setCards(task.cards || [])
