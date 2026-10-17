@@ -103,6 +103,105 @@ def format_quiz_rate_limit_error(exc: Exception) -> str:
     return f"Quiz generation is temporarily unavailable because the AI provider's rate limit has been reached.{cooldown}"
 
 
+def is_concept_supported_in_text(concept: str | None, text: str) -> bool:
+    """
+    Checks whether a requested concept is supported in the provided source text.
+    Uses whole-phrase check followed by meaningful token check.
+    """
+    if not concept or not str(concept).strip() or not text:
+        return False
+
+    c_clean = str(concept).strip().lower()
+    t_clean = text.lower()
+
+    if c_clean in t_clean:
+        return True
+
+    stop_words = {
+        "the", "and", "that", "this", "these", "those", "with", "from",
+        "into", "for", "are", "was", "were", "been", "being", "has",
+        "have", "had", "which", "what", "when", "where", "while", "than",
+        "then", "their", "there", "they", "how", "why", "who", "whom",
+        "whose", "does", "did", "can", "could", "would", "should", "will"
+    }
+    words = [w for w in re.findall(r"[a-zA-Z0-9]{3,}", c_clean) if w not in stop_words]
+    if not words:
+        return False
+
+    # For multi-word concepts, at least one key distinguishing term must appear
+    return any(w in t_clean for w in words)
+
+
+def extract_relevant_quiz_context(
+    full_text: str,
+    concept: str | None = None,
+    max_chars: int = 12000
+) -> str:
+    """
+    Memory-conscious context extraction that provides question generation and grounding
+    validation access to relevant source evidence without loading arbitrary multi-megabyte
+    documents into memory.
+    """
+    if not full_text:
+        return ""
+
+    if len(full_text) <= max_chars:
+        return full_text
+
+    t_clean = full_text.lower()
+    target_pos = -1
+
+    # 1. Search for exact concept phrase
+    if concept and str(concept).strip():
+        c_clean = str(concept).strip().lower()
+        target_pos = t_clean.find(c_clean)
+
+        # 2. Search for meaningful keywords if exact phrase match not found
+        if target_pos == -1:
+            stop_words = {
+                "the", "and", "that", "this", "these", "those", "with", "from",
+                "into", "for", "are", "was", "were", "been", "being", "has",
+                "have", "had", "which", "what", "when", "where", "while", "than",
+                "then", "their", "there", "they", "how", "why", "who", "whom",
+                "whose", "does", "did", "can", "could", "would", "should", "will"
+            }
+            words = [w for w in re.findall(r"[a-zA-Z0-9]{3,}", c_clean) if w not in stop_words]
+            for w in words:
+                pos = t_clean.find(w)
+                if pos != -1:
+                    target_pos = pos
+                    break
+
+    # If concept found, center the window around its occurrence
+    if target_pos != -1:
+        half_window = max_chars // 2
+        start = max(0, target_pos - half_window)
+        end = min(len(full_text), start + max_chars)
+        if end == len(full_text):
+            start = max(0, end - max_chars)
+
+        # Snap to nearest line boundary if possible to avoid cutting mid-sentence
+        if start > 0:
+            next_nl = full_text.find("\n", start, start + 300)
+            if next_nl != -1 and next_nl < end:
+                start = next_nl + 1
+        if end < len(full_text):
+            last_nl = full_text.rfind("\n", end - 300, end)
+            if last_nl != -1 and last_nl > start:
+                end = last_nl
+
+        return full_text[start:end].strip()
+
+    # If no concept or concept not found, sample representative sections (beginning, middle, end)
+    part_len = max_chars // 3
+    first_part = full_text[:part_len]
+    mid_start = max(0, (len(full_text) // 2) - (part_len // 2))
+    mid_part = full_text[mid_start:mid_start + part_len]
+    last_part = full_text[-part_len:]
+
+    return f"{first_part}\n\n[...]\n\n{mid_part}\n\n[...]\n\n{last_part}".strip()
+
+
 quiz_bp = Blueprint('quiz', __name__)
 
 @quiz_bp.route('/quiz/<session_id>', methods=['GET'])
@@ -174,7 +273,6 @@ def generate_quiz(session_id):
     valid, error = validate_extracted_text(full_text, max_length=None)
     if not valid:
         return jsonify({"error": "no_text"}), 400
-    full_text = full_text[:3000]
         
     data, parse_error = parse_json_request(request)
     if parse_error:
@@ -190,6 +288,32 @@ def generate_quiz(session_id):
     # Get learner-adaptive plan FIRST
     adaptive_context = get_next_learning_action(session_id, concept=requested_concept)
     adaptive_plan = adaptive_context["question_plan"]
+
+    # Ensure adaptive target concept is grounded in the available source material.
+    # If unsupported, safely derive a target from the session knowledge graph or use the safe fallback (None).
+    target_concept = adaptive_plan.get("concept")
+    if target_concept and not is_concept_supported_in_text(target_concept, full_text):
+        graph_nodes = (session_data.get("graph") or {}).get("nodes", [])
+        derived_concept = None
+        for node in graph_nodes:
+            lbl = node.get("label") or node.get("id")
+            if lbl and is_concept_supported_in_text(lbl, full_text):
+                derived_concept = lbl
+                break
+
+        if derived_concept:
+            adaptive_plan["concept"] = derived_concept
+            adaptive_context["concept"] = derived_concept
+        else:
+            adaptive_plan["concept"] = None
+            adaptive_context["concept"] = None
+
+    # Memory-conscious context extraction tailored to the target concept (or representative sampling)
+    quiz_context = extract_relevant_quiz_context(
+        full_text,
+        concept=adaptive_plan.get("concept"),
+        max_chars=12000
+    )
 
     # User-requested difficulty takes priority when available
     adaptive_difficulty = adaptive_plan.get("difficulty")
@@ -500,7 +624,7 @@ QUESTION NOVELTY RULES:
 
                 try:
                     raw = generator.chain.invoke({
-                        "context": full_text,
+                        "context": quiz_context,
                         "question": prompt
                     })
 
@@ -530,7 +654,7 @@ GENERATED QUESTION:
 
                                 try:
                                     validation_raw = generator.chain.invoke({
-                                        "context": full_text,
+                                        "context": quiz_context,
                                         "question": validation_prompt
                                     })
 
@@ -724,7 +848,7 @@ GENERATED QUESTION:
 
                                     source_normalized = (
                                         normalize_source_text(
-                                            full_text
+                                            quiz_context
                                         )
                                     )
 
@@ -771,6 +895,19 @@ GENERATED QUESTION:
                                                 answer_evidence,
                                                 source_normalized
                                             )
+                                            if (not q_in_src or not a_in_src) and len(full_text) > len(quiz_context):
+                                                full_source_normalized = normalize_source_text(full_text)
+                                                if not q_in_src:
+                                                    q_in_src = quote_grounded_in_source(
+                                                        question_evidence,
+                                                        full_source_normalized
+                                                    )
+                                                if not a_in_src:
+                                                    a_in_src = quote_grounded_in_source(
+                                                        answer_evidence,
+                                                        full_source_normalized
+                                                    )
+
                                             sup_claim = evidence_supports_claim(
                                                 q.get(
                                                     "question",
@@ -1005,7 +1142,7 @@ def generate_reassessment(session_id):
         )
 
         res = generator.chain.invoke({
-            "context": full_text[:6000],
+            "context": extract_relevant_quiz_context(full_text, concept=concept, max_chars=6000),
             "question": prompt,
         })
 
@@ -1407,7 +1544,7 @@ inside an adaptive learning intervention.
 Concept: {concept}
 
 Original learning context:
-{context[:12000]}
+{extract_relevant_quiz_context(context, concept=concept, max_chars=12000)}
 
 Checking question:
 {question}
