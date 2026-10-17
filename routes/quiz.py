@@ -6,7 +6,7 @@ from agents.adaptive_orchestrator import get_next_learning_action
 from flask import Blueprint, jsonify, request
 from agents.mastery_engine import update_mastery_from_assessment
 from routes.store import session_store
-from llm.generator import Generator
+from llm.gemini_generator import QuizGenerator as Generator
 from agents.prompts import (
     QUIZ_MCQ_PROMPT,
     QUIZ_SHORT_ANSWER_PROMPT,
@@ -871,6 +871,8 @@ GENERATED QUESTION:
                                 except Exception as validation_error:
                                     if is_rate_limit_error(validation_error):
                                         raise RuntimeError(format_quiz_rate_limit_error(validation_error))
+                                    if isinstance(validation_error, ValueError) and "QUIZ_GEMINI_API_KEY" in str(validation_error):
+                                        raise
                                     print(
                                         "Grounding validation error:",
                                         repr(validation_error)
@@ -879,6 +881,8 @@ GENERATED QUESTION:
                 except Exception as e:
                     if is_rate_limit_error(e):
                         raise RuntimeError(format_quiz_rate_limit_error(e))
+                    if isinstance(e, ValueError) and "QUIZ_GEMINI_API_KEY" in str(e):
+                        raise
                     print(
                         "Generation loop error:",
                         repr(e)
@@ -941,7 +945,7 @@ GENERATED QUESTION:
             "adaptive_context": adaptive_context,
         })
 
-    except RuntimeError as e:
+    except (RuntimeError, ValueError) as e:
         return json_error(str(e))
     except Exception as e:
         print("🔥 QUIZ GENERATION ERROR:", repr(e))
