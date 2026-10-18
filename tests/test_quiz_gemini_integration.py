@@ -738,6 +738,595 @@ class TestQuizGeminiIntegration(unittest.TestCase):
             self.assertEqual(data["submission"]["correct_count"], 4)
             self.assertEqual(data["submission"]["answers"]["mcq_1"], 1)
 
+    def test_short_answer_criterion_grading_incomplete_answer_not_full_marks(self):
+        """
+        Regression test: An answer addressing offspring characteristics but omitting
+        long-term population effects must NOT receive full marks (10/10).
+        """
+        from routes.quiz import quiz_bp
+        from flask import Flask
+
+        app = Flask(__name__)
+        app.register_blueprint(quiz_bp, url_prefix="/api")
+        client = app.test_client()
+
+        session_id = "test-crit-incomplete-001"
+        question = "Based on the provided text, analyze the contrasting outcomes of asexual reproduction involving a parent versus sexual reproduction involving two individuals with respect to offspring characteristics and their potential long-term effects on populations over generations."
+        user_answer = "Asexual reproduction produces genetically similar offspring from one parent, while sexual reproduction combines genetic material from two parents and creates variation."
+        sample_answer = "Asexual reproduction involves a single parent and produces genetically identical offspring. Sexual reproduction involves two parents and produces variable offspring. Over generations, genetic variation allows populations to adapt to changing environments and resist diseases, whereas asexual populations are more vulnerable to extinction."
+        concept = "comparison of offspring characteristics and evolutionary effects"
+
+        # Mock generator returns criterion-based grading response where offspring criterion is met, but population criterion is missing
+        mock_ai_response = json.dumps({
+            "criteria": [
+                {
+                    "criterion": "Contrast of offspring characteristics (asexual vs sexual reproduction)",
+                    "max_points": 5.0,
+                    "awarded_points": 5.0,
+                    "status": "fully_met",
+                    "evidence": "Asexual produces genetically similar offspring from one parent, while sexual reproduction combines genetic material from two parents and creates variation."
+                },
+                {
+                    "criterion": "Potential long-term effects on populations over generations",
+                    "max_points": 5.0,
+                    "awarded_points": 0.0,
+                    "status": "missing",
+                    "evidence": "Not addressed"
+                }
+            ],
+            "score": 5.0,
+            "feedback": "You accurately analyzed offspring characteristics and genetic variation, but omitted long-term population effects over generations.",
+            "correct_concepts": ["C1"],
+            "missed_concepts": ["C1"],
+            "study_tip": "Review how genetic variation in sexual reproduction aids long-term population adaptability over generations."
+        })
+
+        class MockChain:
+            def invoke(self, *args, **kwargs):
+                return mock_ai_response
+
+        class MockGen:
+            def __init__(self, *args, **kwargs):
+                self.chain = MockChain()
+
+        with patch("utils.auth.get_user_id_by_token", return_value=1), \
+             patch("utils.auth.verify_session_owner", return_value=(True, 200)), \
+             patch("routes.quiz.validate_session_id", return_value=(True, None)), \
+             patch("routes.quiz.Generator", MockGen), \
+             patch("routes.quiz.record_quiz_score", return_value=None), \
+             patch("routes.quiz.record_misconception", return_value=None), \
+             patch("routes.quiz.optimize_learning_path", return_value={"action": "review", "reason": "Low mastery detected"}), \
+             patch("routes.quiz.update_mastery_from_assessment", return_value={"score": 5.0, "correct": False}) as mock_update_mastery, \
+             patch("routes.quiz.detect_misconception", return_value={"misconception": "incomplete_understanding", "severity": "low"}) as mock_detect_misc:
+
+            res = client.post(
+                "/api/quiz/grade",
+                headers={"Authorization": "Bearer test-token"},
+                json={
+                    "session_id": session_id,
+                    "question": question,
+                    "user_answer": user_answer,
+                    "sample_answer": sample_answer,
+                    "concept": concept,
+                }
+            )
+
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+
+            # The incomplete answer must not receive full marks
+            self.assertNotEqual(data["score"], 10.0)
+            self.assertLess(data["score"], 7.0)
+            self.assertEqual(data["score"], 5.0)
+
+            # Criteria breakdown must be present and reflect the missing criterion
+            self.assertIn("criteria", data)
+            self.assertEqual(len(data["criteria"]), 2)
+            c1, c2 = data["criteria"][0], data["criteria"][1]
+            self.assertEqual(c1["status"], "fully_met")
+            self.assertEqual(c1["awarded_points"], 5.0)
+            self.assertEqual(c2["status"], "missing")
+            self.assertEqual(c2["awarded_points"], 0.0)
+
+            # Misconception detection should run for scores < 7
+            mock_detect_misc.assert_called_once()
+            # update_mastery_from_assessment must be called with correct=False for partial credit (< 7)
+            mock_update_mastery.assert_called_once()
+            call_kwargs = mock_update_mastery.call_args[1]
+            self.assertFalse(call_kwargs["correct"])
+            self.assertEqual(call_kwargs["score"], 5.0)
+
+    def test_short_answer_criterion_grading_complete_answer_scores_higher(self):
+        """
+        Regression test: A complete answer addressing both criteria must score higher
+        (e.g. 10.0/10) and mark assessment correct.
+        """
+        from routes.quiz import quiz_bp
+        from flask import Flask
+
+        app = Flask(__name__)
+        app.register_blueprint(quiz_bp, url_prefix="/api")
+        client = app.test_client()
+
+        session_id = "test-crit-complete-002"
+        question = "Based on the provided text, analyze the contrasting outcomes of asexual reproduction involving a parent versus sexual reproduction involving two individuals with respect to offspring characteristics and their potential long-term effects on populations over generations."
+        complete_answer = "Asexual reproduction involves one parent producing genetically identical offspring, which offers rapid reproduction but little genetic diversity, making populations vulnerable to disease or sudden environmental changes over generations. Sexual reproduction involves two parents combining genetic material to produce variable offspring, which promotes diversity and allows populations to adapt, survive environmental pressures, and evolve over generations."
+        sample_answer = "Asexual reproduction involves a single parent and produces genetically identical offspring. Sexual reproduction involves two parents and produces variable offspring. Over generations, genetic variation allows populations to adapt to changing environments and resist diseases, whereas asexual populations are more vulnerable to extinction."
+        concept = "comparison of offspring characteristics and evolutionary effects"
+
+        mock_ai_response = json.dumps({
+            "criteria": [
+                {
+                    "criterion": "Contrast of offspring characteristics (asexual vs sexual reproduction)",
+                    "max_points": 5.0,
+                    "awarded_points": 5.0,
+                    "status": "fully_met",
+                    "evidence": "Identical clones vs variable offspring."
+                },
+                {
+                    "criterion": "Potential long-term effects on populations over generations",
+                    "max_points": 5.0,
+                    "awarded_points": 5.0,
+                    "status": "fully_met",
+                    "evidence": "Vulnerability to disease vs adaptability and survival over generations."
+                }
+            ],
+            "score": 10.0,
+            "feedback": "Comprehensive analysis addressing both offspring traits and long-term evolutionary impacts.",
+            "correct_concepts": ["C1"],
+            "missed_concepts": [],
+            "study_tip": "Excellent work."
+        })
+
+        class MockChain:
+            def invoke(self, *args, **kwargs):
+                return mock_ai_response
+
+        class MockGen:
+            def __init__(self, *args, **kwargs):
+                self.chain = MockChain()
+
+        with patch("utils.auth.get_user_id_by_token", return_value=1), \
+             patch("utils.auth.verify_session_owner", return_value=(True, 200)), \
+             patch("routes.quiz.validate_session_id", return_value=(True, None)), \
+             patch("routes.quiz.Generator", MockGen), \
+             patch("routes.quiz.record_quiz_score", return_value=None), \
+             patch("routes.quiz.record_misconception", return_value=None), \
+             patch("routes.quiz.optimize_learning_path", return_value={"action": "advance", "reason": "Strong mastery detected"}), \
+             patch("routes.quiz.update_mastery_from_assessment", return_value={"score": 10.0, "correct": True}) as mock_update_mastery:
+
+            res = client.post(
+                "/api/quiz/grade",
+                headers={"Authorization": "Bearer test-token"},
+                json={
+                    "session_id": session_id,
+                    "question": question,
+                    "user_answer": complete_answer,
+                    "sample_answer": sample_answer,
+                    "concept": concept,
+                }
+            )
+
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertEqual(data["score"], 10.0)
+            self.assertGreater(data["score"], 5.0)
+
+            # update_mastery_from_assessment must be called with correct=True
+            mock_update_mastery.assert_called_once()
+            call_kwargs = mock_update_mastery.call_args[1]
+            self.assertTrue(call_kwargs["correct"])
+            self.assertEqual(call_kwargs["score"], 10.0)
+
+    def test_short_answer_criterion_grading_irrelevant_answer_scores_low(self):
+        """
+        Regression test: An irrelevant answer must score low (0/10).
+        """
+        from routes.quiz import quiz_bp
+        from flask import Flask
+
+        app = Flask(__name__)
+        app.register_blueprint(quiz_bp, url_prefix="/api")
+        client = app.test_client()
+
+        session_id = "test-crit-irrelevant-003"
+        question = "Based on the provided text, analyze the contrasting outcomes of asexual reproduction involving a parent versus sexual reproduction involving two individuals with respect to offspring characteristics and their potential long-term effects on populations over generations."
+        irrelevant_answer = "Mitochondria are the powerhouse of the cell."
+        sample_answer = "Asexual reproduction involves a single parent and produces genetically identical offspring..."
+        concept = "comparison of offspring characteristics and evolutionary effects"
+
+        mock_ai_response = json.dumps({
+            "criteria": [
+                {
+                    "criterion": "Contrast of offspring characteristics (asexual vs sexual reproduction)",
+                    "max_points": 5.0,
+                    "awarded_points": 0.0,
+                    "status": "missing",
+                    "evidence": "Not addressed."
+                },
+                {
+                    "criterion": "Potential long-term effects on populations over generations",
+                    "max_points": 5.0,
+                    "awarded_points": 0.0,
+                    "status": "missing",
+                    "evidence": "Not addressed."
+                }
+            ],
+            "score": 0.0,
+            "feedback": "Your answer is completely unrelated to the question.",
+            "correct_concepts": [],
+            "missed_concepts": ["C1"],
+            "study_tip": "Review asexual and sexual reproduction concepts."
+        })
+
+        class MockChain:
+            def invoke(self, *args, **kwargs):
+                return mock_ai_response
+
+        class MockGen:
+            def __init__(self, *args, **kwargs):
+                self.chain = MockChain()
+
+        with patch("utils.auth.get_user_id_by_token", return_value=1), \
+             patch("utils.auth.verify_session_owner", return_value=(True, 200)), \
+             patch("routes.quiz.validate_session_id", return_value=(True, None)), \
+             patch("routes.quiz.Generator", MockGen), \
+             patch("routes.quiz.record_quiz_score", return_value=None), \
+             patch("routes.quiz.record_misconception", return_value=None), \
+             patch("routes.quiz.optimize_learning_path", return_value={"action": "review", "reason": "Low mastery detected"}), \
+             patch("routes.quiz.detect_misconception", return_value={"misconception": "unrelated", "severity": "high"}), \
+             patch("routes.quiz.update_mastery_from_assessment", return_value={"score": 0.0, "correct": False}) as mock_update_mastery:
+
+            res = client.post(
+                "/api/quiz/grade",
+                headers={"Authorization": "Bearer test-token"},
+                json={
+                    "session_id": session_id,
+                    "question": question,
+                    "user_answer": irrelevant_answer,
+                    "sample_answer": sample_answer,
+                    "concept": concept,
+                }
+            )
+
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertEqual(data["score"], 0.0)
+            mock_update_mastery.assert_called_once()
+            call_kwargs = mock_update_mastery.call_args[1]
+            self.assertFalse(call_kwargs["correct"])
+
+    def test_short_answer_criteria_score_deterministic_enforcement(self):
+        """
+        Regression test: If the raw AI output claims score: 10, but the criteria evaluation
+        shows a missing criterion (or student answer lacks the required component), the backend
+        deterministically enforces the criteria calculation and overrides score to 5.0.
+        """
+        from routes.quiz import quiz_bp
+        from flask import Flask
+
+        app = Flask(__name__)
+        app.register_blueprint(quiz_bp, url_prefix="/api")
+        client = app.test_client()
+
+        session_id = "test-crit-override-004"
+        question = "Based on the provided text, analyze the contrasting outcomes of asexual reproduction involving a parent versus sexual reproduction involving two individuals with respect to offspring characteristics and their potential long-term effects on populations over generations."
+        user_answer = "Asexual reproduction produces genetically similar offspring from one parent, while sexual reproduction combines genetic material from two parents and creates variation."
+        concept = "comparison of offspring characteristics and evolutionary effects"
+
+        # Simulate buggy AI returning holistic score: 10 despite missing population criterion
+        buggy_ai_response = json.dumps({
+            "criteria": [
+                {
+                    "criterion": "Contrast of offspring characteristics (asexual vs sexual reproduction)",
+                    "max_points": 5.0,
+                    "awarded_points": 5.0,
+                    "status": "fully_met",
+                    "evidence": "Offspring characteristics stated."
+                },
+                {
+                    "criterion": "Potential long-term effects on populations over generations",
+                    "max_points": 5.0,
+                    "awarded_points": 0.0,
+                    "status": "missing",
+                    "evidence": "Not addressed in the answer."
+                }
+            ],
+            "score": 10.0,  # Buggy raw score
+            "feedback": "Missing long term effects",
+            "correct_concepts": ["C1"],
+            "missed_concepts": ["C1"]
+        })
+
+        class MockChain:
+            def invoke(self, *args, **kwargs):
+                return buggy_ai_response
+
+        class MockGen:
+            def __init__(self, *args, **kwargs):
+                self.chain = MockChain()
+
+        with patch("utils.auth.get_user_id_by_token", return_value=1), \
+             patch("utils.auth.verify_session_owner", return_value=(True, 200)), \
+             patch("routes.quiz.validate_session_id", return_value=(True, None)), \
+             patch("routes.quiz.Generator", MockGen), \
+             patch("routes.quiz.record_quiz_score", return_value=None), \
+             patch("routes.quiz.record_misconception", return_value=None), \
+             patch("routes.quiz.optimize_learning_path", return_value={"action": "review", "reason": "Low mastery detected"}), \
+             patch("routes.quiz.detect_misconception", return_value={"misconception": "incomplete_understanding", "severity": "low"}), \
+             patch("routes.quiz.update_mastery_from_assessment", return_value={"score": 5.0, "correct": False}) as mock_update_mastery:
+
+            res = client.post(
+                "/api/quiz/grade",
+                headers={"Authorization": "Bearer test-token"},
+                json={
+                    "session_id": session_id,
+                    "question": question,
+                    "user_answer": user_answer,
+                    "concept": concept,
+                }
+            )
+
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            # Backend calculation must override the 10.0 score to 5.0
+            self.assertEqual(data["score"], 5.0)
+            mock_update_mastery.assert_called_once()
+            self.assertFalse(mock_update_mastery.call_args[1]["correct"])
+
+    def test_short_answer_correct_paraphrase_without_rubric_keywords(self):
+        """
+        Regression test: An answer providing a valid, scientifically sound paraphrase without
+        repeating literal rubric keywords must receive full marks (10.0/10).
+        """
+        from routes.quiz import quiz_bp
+        from flask import Flask
+
+        app = Flask(__name__)
+        app.register_blueprint(quiz_bp, url_prefix="/api")
+        client = app.test_client()
+
+        session_id = "test-crit-paraphrase-005"
+        question = "Based on the provided text, analyze the contrasting outcomes of asexual reproduction involving a parent versus sexual reproduction involving two individuals with respect to offspring characteristics and their potential long-term effects on populations over generations."
+        paraphrase_answer = "Single-parent propagation yields carbon-copy progeny, whereas biparental union blends inherited traits to foster diversity. Across centuries and ages, this variety empowers biological communities to withstand shifting climates and novel pathogens, whereas uniform lineages risk extinction under environmental stress."
+        concept = "comparison of offspring characteristics and evolutionary effects"
+
+        mock_ai_response = json.dumps({
+            "criteria": [
+                {
+                    "criterion": "Offspring characteristics",
+                    "max_points": 5.0,
+                    "awarded_points": 5.0,
+                    "status": "fully_met",
+                    "evidence": "Single-parent propagation yields carbon-copy progeny, whereas biparental union blends inherited traits to foster diversity."
+                },
+                {
+                    "criterion": "Potential long-term effects on populations over generations",
+                    "max_points": 5.0,
+                    "awarded_points": 5.0,
+                    "status": "fully_met",
+                    "evidence": "Across centuries and ages, this variety empowers biological communities to withstand shifting climates and novel pathogens..."
+                }
+            ],
+            "score": 10.0,
+            "feedback": "Outstanding paraphrase analyzing both offspring uniformity/diversity and long-term population adaptability.",
+            "correct_concepts": ["C1"],
+            "missed_concepts": [],
+            "study_tip": "Keep up the excellent analytical work."
+        })
+
+        class MockChain:
+            def invoke(self, *args, **kwargs):
+                return mock_ai_response
+
+        class MockGen:
+            def __init__(self, *args, **kwargs):
+                self.chain = MockChain()
+
+        with patch("utils.auth.get_user_id_by_token", return_value=1), \
+             patch("utils.auth.verify_session_owner", return_value=(True, 200)), \
+             patch("routes.quiz.validate_session_id", return_value=(True, None)), \
+             patch("routes.quiz.Generator", MockGen), \
+             patch("routes.quiz.record_quiz_score", return_value=None), \
+             patch("routes.quiz.record_misconception", return_value=None), \
+             patch("routes.quiz.optimize_learning_path", return_value={"action": "advance", "reason": "Strong mastery detected"}), \
+             patch("routes.quiz.update_mastery_from_assessment", return_value={"score": 10.0, "correct": True}) as mock_update_mastery:
+
+            res = client.post(
+                "/api/quiz/grade",
+                headers={"Authorization": "Bearer test-token"},
+                json={
+                    "session_id": session_id,
+                    "question": question,
+                    "user_answer": paraphrase_answer,
+                    "concept": concept,
+                }
+            )
+
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertEqual(data["score"], 10.0)
+            self.assertEqual(len(data["criteria"]), 2)
+            self.assertEqual(data["criteria"][0]["status"], "fully_met")
+            self.assertEqual(data["criteria"][1]["status"], "fully_met")
+            mock_update_mastery.assert_called_once()
+            self.assertTrue(mock_update_mastery.call_args[1]["correct"])
+
+    def test_short_answer_unrelated_to_reproduction(self):
+        """
+        Regression test: Questions in non-biology domains (e.g. History/Economics)
+        extract criteria cleanly and evaluate partial scores properly when one criterion is missed.
+        """
+        from routes.quiz import quiz_bp
+        from flask import Flask
+
+        app = Flask(__name__)
+        app.register_blueprint(quiz_bp, url_prefix="/api")
+        client = app.test_client()
+
+        session_id = "test-crit-history-006"
+        question = "Analyze the French Revolution with respect to economic causes and political transformations."
+        user_answer = "The economic causes were high taxation on the Third Estate, food shortages, and national debt from foreign wars."
+        concept = "French Revolution"
+
+        mock_ai_response = json.dumps({
+            "criteria": [
+                {
+                    "criterion": "Economic causes",
+                    "max_points": 5.0,
+                    "awarded_points": 5.0,
+                    "status": "fully_met",
+                    "evidence": "High taxation on the Third Estate, food shortages, and national debt."
+                },
+                {
+                    "criterion": "Political transformations",
+                    "max_points": 5.0,
+                    "awarded_points": 0.0,
+                    "status": "missing",
+                    "evidence": "Not addressed in the answer."
+                }
+            ],
+            "score": 5.0,
+            "feedback": "You clearly explained the financial and agricultural crises, but did not address the political restructuring.",
+            "correct_concepts": ["C1"],
+            "missed_concepts": ["C1"]
+        })
+
+        class MockChain:
+            def invoke(self, *args, **kwargs):
+                return mock_ai_response
+
+        class MockGen:
+            def __init__(self, *args, **kwargs):
+                self.chain = MockChain()
+
+        with patch("utils.auth.get_user_id_by_token", return_value=1), \
+             patch("utils.auth.verify_session_owner", return_value=(True, 200)), \
+             patch("routes.quiz.validate_session_id", return_value=(True, None)), \
+             patch("routes.quiz.Generator", MockGen), \
+             patch("routes.quiz.record_quiz_score", return_value=None), \
+             patch("routes.quiz.record_misconception", return_value=None), \
+             patch("routes.quiz.optimize_learning_path", return_value={"action": "review", "reason": "Low mastery detected"}), \
+             patch("routes.quiz.detect_misconception", return_value={"misconception": "incomplete_understanding", "severity": "low"}), \
+             patch("routes.quiz.update_mastery_from_assessment", return_value={"score": 5.0, "correct": False}) as mock_update_mastery:
+
+            res = client.post(
+                "/api/quiz/grade",
+                headers={"Authorization": "Bearer test-token"},
+                json={
+                    "session_id": session_id,
+                    "question": question,
+                    "user_answer": user_answer,
+                    "concept": concept,
+                }
+            )
+
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertEqual(data["score"], 5.0)
+            self.assertEqual(len(data["criteria"]), 2)
+            self.assertEqual(data["criteria"][0]["criterion"], "Economic causes")
+            self.assertEqual(data["criteria"][0]["awarded_points"], 5.0)
+            self.assertEqual(data["criteria"][1]["criterion"], "Political transformations")
+            self.assertEqual(data["criteria"][1]["awarded_points"], 0.0)
+            mock_update_mastery.assert_called_once()
+            self.assertFalse(mock_update_mastery.call_args[1]["correct"])
+
+    def test_short_answer_more_than_two_criteria_and_explicit_criteria(self):
+        """
+        Regression test: Questions with 3+ criteria and explicit criteria provided by caller
+        are evaluated with proportional point weights and calculate correct score.
+        """
+        from routes.quiz import quiz_bp
+        from flask import Flask
+
+        app = Flask(__name__)
+        app.register_blueprint(quiz_bp, url_prefix="/api")
+        client = app.test_client()
+
+        session_id = "test-crit-multi-007"
+        question = "Compare series and parallel circuits in terms of current flow, voltage distribution across components, and effect of component failure."
+        user_answer = "In a series circuit, current is identical everywhere and voltage divides across resistors. In a parallel circuit, total current divides across branches and each branch receives full supply voltage."
+        concept = "Electric Circuits"
+
+        explicit_criteria = [
+            {"criterion": "Current flow differences", "max_points": 3.0},
+            {"criterion": "Voltage distribution differences", "max_points": 3.0},
+            {"criterion": "Effect of component failure", "max_points": 4.0}
+        ]
+
+        # Student answered criteria 1 and 2, but omitted criterion 3 (effect of component failure)
+        mock_ai_response = json.dumps({
+            "criteria": [
+                {
+                    "criterion": "Current flow differences",
+                    "max_points": 3.0,
+                    "awarded_points": 3.0,
+                    "status": "fully_met",
+                    "evidence": "Series current identical, parallel current divides."
+                },
+                {
+                    "criterion": "Voltage distribution differences",
+                    "max_points": 3.0,
+                    "awarded_points": 3.0,
+                    "status": "fully_met",
+                    "evidence": "Series voltage divides, parallel receives full supply voltage."
+                },
+                {
+                    "criterion": "Effect of component failure",
+                    "max_points": 4.0,
+                    "awarded_points": 0.0,
+                    "status": "missing",
+                    "evidence": "Omitted. Did not explain what happens when one component breaks."
+                }
+            ],
+            "score": 6.0,
+            "feedback": "You answered current and voltage correctly, but did not explain what happens when a component fails.",
+            "correct_concepts": ["C1"],
+            "missed_concepts": ["C1"]
+        })
+
+        class MockChain:
+            def invoke(self, *args, **kwargs):
+                return mock_ai_response
+
+        class MockGen:
+            def __init__(self, *args, **kwargs):
+                self.chain = MockChain()
+
+        with patch("utils.auth.get_user_id_by_token", return_value=1), \
+             patch("utils.auth.verify_session_owner", return_value=(True, 200)), \
+             patch("routes.quiz.validate_session_id", return_value=(True, None)), \
+             patch("routes.quiz.Generator", MockGen), \
+             patch("routes.quiz.record_quiz_score", return_value=None), \
+             patch("routes.quiz.record_misconception", return_value=None), \
+             patch("routes.quiz.optimize_learning_path", return_value={"action": "practice", "reason": "Partial mastery"}), \
+             patch("routes.quiz.detect_misconception", return_value={"misconception": "incomplete_understanding", "severity": "low"}), \
+             patch("routes.quiz.update_mastery_from_assessment", return_value={"score": 6.0, "correct": False}) as mock_update_mastery:
+
+            res = client.post(
+                "/api/quiz/grade",
+                headers={"Authorization": "Bearer test-token"},
+                json={
+                    "session_id": session_id,
+                    "question": question,
+                    "user_answer": user_answer,
+                    "concept": concept,
+                    "criteria": explicit_criteria,
+                }
+            )
+
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertEqual(data["score"], 6.0)
+            self.assertEqual(len(data["criteria"]), 3)
+            self.assertEqual(data["criteria"][0]["awarded_points"], 3.0)
+            self.assertEqual(data["criteria"][1]["awarded_points"], 3.0)
+            self.assertEqual(data["criteria"][2]["awarded_points"], 0.0)
+            self.assertEqual(data["criteria"][2]["status"], "missing")
+            mock_update_mastery.assert_called_once()
+            self.assertFalse(mock_update_mastery.call_args[1]["correct"])
+
 
 if __name__ == "__main__":
     unittest.main()

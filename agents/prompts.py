@@ -229,48 +229,44 @@ Return ONLY valid JSON, no other text:
   ]
 }"""
 
-GRADING_PROMPT = """Grade this student answer on a scale of 0 to 10.
+class _GradingPromptTemplate(str):
+    def format(self, *args, **kwargs):
+        if "criteria_guidance" not in kwargs:
+            kwargs["criteria_guidance"] = ""
+        return super().format(*args, **kwargs)
+
+
+GRADING_PROMPT = _GradingPromptTemplate("""Grade this student answer on a scale of 0 to 10 using strict criterion-based evaluation.
 
 Be fair, specific, evidence-based, and sensitive to what the question actually asks.
 
-IMPORTANT GRADING PROCESS:
-1. First determine exactly what the question is asking.
-2. Identify the essential factual information required to answer that question.
-3. Use the sample correct answer as a reference for correctness, but do NOT treat its wording or specific examples as the only acceptable answers.
-4. Determine the essential requirements from the QUESTION itself. Grade the student's answer based on whether it correctly satisfies those requirements.
-5. Do NOT award full credit merely because the answer sounds generally related to the topic.
+CRITERION-BASED EVALUATION PROCESS:
+1. Deconstruct the question into its essential required evaluation criteria (rubric).
+2. For questions that ask to compare, analyze, or explain multiple dimensions or parts (e.g. comparing offspring characteristics AND potential long-term population/evolutionary effects, causes AND consequences, mechanism AND function):
+   - You MUST define a distinct criterion for EACH required component.
+   - Distribute 10.0 total points across the criteria according to their importance in the question (sum of max_points MUST equal 10.0).
+3. Evaluate the student's answer against each criterion independently:
+   - "criterion": description of the required component
+   - "max_points": maximum points allocated for this criterion
+   - "awarded_points": points earned by the student (0.0 to max_points)
+   - "status": "fully_met" (awarded == max), "partially_met" (0 < awarded < max), or "missing" (awarded == 0)
+   - "evidence": quote or summary of what the student demonstrated, or "Not addressed" if missing
+4. STRICT CRITERION SCORING RULES:
+   - If a required criterion is omitted, ignored, or absent from the student answer, its awarded_points MUST be 0.0 and its status MUST be "missing".
+   - You MUST NOT award credit for an essential criterion that is absent from the student answer.
+   - An answer that omits an essential requested component CANNOT receive full marks (10/10) or a high passing score. For example, if a question asks for offspring characteristics AND long-term population effects over generations, an answer that only discusses offspring characteristics receives partial credit (e.g. 5.0/10), NEVER 10/10.
+   - The total score MUST equal the exact sum of awarded_points across all criteria.
+5. Use the sample correct answer as a reference for correctness, but do NOT treat its wording or specific examples as the only acceptable answers.
 6. A vague statement about a topic is NOT equivalent to identifying the specific fact asked by the question.
-7. If the student gives only a broad/general statement but does not provide the specific information required by the question, award partial credit.
-8. If the student gives some required information but misses another essential part, award partial credit.
-9. Award 9-10 only when the student clearly demonstrates the essential knowledge required by the question.
-10. If the student's wording differs from the sample answer but clearly communicates the same essential fact, award appropriate credit.
-10a. If the question asks for an example, adaptation, strategy, method, cause, consequence, or other item without specifying an exact required example, accept any factually correct answer that directly satisfies the question, even if it differs from the sample answer.
-10b. Do NOT penalize a student merely for choosing a different valid example from the one used in the sample answer.
-10c. For reassessment/checking questions, prioritize whether the student demonstrates the targeted understanding requested by the question, rather than whether the answer matches the sample answer's examples.
-11. Do NOT require every supporting detail from the sample answer when those details are not necessary.
-12. Do NOT invent mistakes or explanations that are not supported by the question and answer.
-13. For numerical or mathematical questions, independently calculate and verify the correct result before assigning a score.
-14. Do NOT claim that arithmetic is incorrect unless you have actually checked the calculation yourself.
-15. If the student's answer matches the required correct result, treat that component as correct even if the reasoning is not shown.
-16. For questions containing multiple required components, evaluate each component independently before assigning the overall score.
-17. If the student correctly provides one essential component but omits or incorrectly answers other essential components, award partial credit proportional to what was demonstrated. Do NOT treat the entire answer as incorrect simply because it is incomplete.
-18. For numerical questions that also ask for explanation, distinguish between:
-    - correctness of the numerical result,
-    - completeness of the required values,
-    - conceptual explanation or reasoning.
-    A correct numerical result with a missing explanation should receive partial credit, not a near-zero score.
-19. If a student gives a correct numerical value but does not answer the conceptual part of the question, explicitly state that the numerical result is correct and identify the missing conceptual requirement in the feedback.
-20. Do not award full credit when an essential requested component is missing.
-21. Feedback must tell the student exactly what they should improve next.
-IMPORTANT VAGUE-ANSWER RULE:
-- If the question asks for a specific event, date, person, cause, consequence, definition, process, or historical change, the student must actually identify that specific information.
-- Generic statements such as "it was an important year", "it caused major changes", "it affected society", or "it changed governance" are not sufficient by themselves when the question asks what specifically happened or why it was significant.
-- For example, if the question asks about the significance of 1858, saying "1858 brought a major change in British governance" shows some understanding but does NOT identify the essential event that the British Crown took direct control from the East India Company. This should receive partial rather than full credit.
-- Do not confuse topical relevance with demonstrated knowledge.
+7. Award 9-10 only when the student clearly demonstrates all essential knowledge required across all criteria.
+8. If the student's wording differs from the sample answer but clearly communicates the same essential fact, award appropriate credit.
+9. For numerical or mathematical questions, independently calculate and verify the correct result before assigning a score.
+10. Feedback must tell the student exactly what was demonstrated and what required criterion was missing.
 
 Question: {question}
 Sample correct answer: {sample_answer}
 Student answer: {user_answer}
+{criteria_guidance}
 
 IMPORTANT CONCEPT RULE:
 - The question has a fixed list of canonical concepts.
@@ -281,19 +277,33 @@ IMPORTANT CONCEPT RULE:
 - Return ONLY the IDs provided in the canonical concept list.
 - A concept ID can appear in either correct_concepts or missed_concepts.
 - Every concept ID must come from the provided canonical concept list.
-- If the student's wording differs from the canonical concept wording, select the matching concept ID.
-- Only mark a concept as missed when it is relevant to the question and is necessary or meaningfully important for answering it.
-- Do NOT mark an additional/supporting concept as missed merely because the student did not mention it.
-- If the student demonstrates only a broad idea but misses the essential specific fact represented by a canonical concept, that concept should be marked as missed.
+- If the student demonstrated understanding of a concept, include its ID in correct_concepts.
+- If an essential criterion representing the concept was missed or omitted, include its ID in missed_concepts.
 
 Canonical concepts:
 {canonical_concepts}
 
 Return ONLY valid JSON:
 {{
-  "score": 10,
-  "feedback": "Specific, evidence-based feedback in 1-2 sentences",
-  "correct_concepts": ["list of concept IDs the student demonstrated"],
-  "missed_concepts": ["list of relevant concept IDs the student genuinely missed"],
+  "criteria": [
+    {{
+      "criterion": "Name of required component 1",
+      "max_points": 5.0,
+      "awarded_points": 5.0,
+      "status": "fully_met",
+      "evidence": "Brief evidence or quote from student answer"
+    }},
+    {{
+      "criterion": "Name of required component 2",
+      "max_points": 5.0,
+      "awarded_points": 0.0,
+      "status": "missing",
+      "evidence": "Not addressed in the student answer"
+    }}
+  ],
+  "score": 5.0,
+  "feedback": "Specific, evidence-based feedback in 1-2 sentences explaining what was correct and what was missing",
+  "correct_concepts": ["list of concept IDs demonstrated"],
+  "missed_concepts": ["list of relevant concept IDs genuinely missed"],
   "study_tip": "One specific thing the student should review next"
-}}"""
+}}""")

@@ -607,6 +607,33 @@ className="mt-3 px-4 py-2 bg-[var(--accent-purple)] text-white rounded-[var(--ra
 <p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-1">AI Feedback</p>
 <p className="text-sm text-[var(--text-primary)] leading-relaxed">{result.feedback}</p>
 </div>
+
+{result.criteria && result.criteria.length > 0 && (
+<div className="mt-3 p-3 rounded-lg bg-[var(--bg-surface)] border border-[var(--border)]">
+<p className="text-xs font-semibold uppercase tracking-wide text-[var(--text-secondary)] mb-2">Rubric Breakdown</p>
+<div className="space-y-2">
+{result.criteria.map((crit, idx) => (
+<div key={idx} className="flex items-start justify-between gap-2 text-xs">
+<div className="flex-1">
+<span className="font-medium text-[var(--text-primary)]">{crit.criterion}</span>
+{crit.evidence && <p className="text-[var(--text-secondary)] mt-0.5 text-[11px]">{crit.evidence}</p>}
+</div>
+<div className="flex items-center gap-1.5 shrink-0">
+<span className={`px-1.5 py-0.5 rounded text-[10px] font-medium ${
+crit.status === 'fully_met' ? 'bg-emerald-500/20 text-emerald-300' :
+crit.status === 'partially_met' ? 'bg-amber-500/20 text-amber-300' :
+'bg-rose-500/20 text-rose-300'
+}`}>
+{crit.status === 'fully_met' ? 'Met' : crit.status === 'partially_met' ? 'Partial' : 'Missing'}
+</span>
+<span className="font-semibold text-[var(--text-primary)]">{crit.awarded_points}/{crit.max_points}</span>
+</div>
+</div>
+))}
+</div>
+</div>
+)}
+
 {result.study_tip && (
 <div className="mt-3 p-3 rounded-lg bg-purple-500/10 border border-purple-500/20">
 <p className="text-xs text-purple-200 font-semibold mb-1">Study Tip</p>

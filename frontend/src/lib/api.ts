@@ -116,6 +116,14 @@ export interface LearningPath {
   misconception?: string;
 }
 
+export interface GradeCriterion {
+  criterion: string;
+  max_points: number;
+  awarded_points: number;
+  status: 'fully_met' | 'partially_met' | 'missing' | string;
+  evidence?: string;
+}
+
 export interface GradeResult {
   score: number;
   feedback: string;
@@ -124,6 +132,7 @@ export interface GradeResult {
   study_tip?: string;
   misconception?: string | null;
   learning_path?: LearningPath;
+  criteria?: GradeCriterion[];
 }
 
 export interface Session {

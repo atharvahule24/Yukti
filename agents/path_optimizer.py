@@ -416,9 +416,15 @@ def optimize_learning_path(
         )
 
     elif mastery < 40:
-        action = "review"
-        difficulty = "easy"
-        reason = f"Low mastery detected for {concept}."
+        recent = weakest.get("recent_score")
+        if recent is not None and recent >= 7.0:
+            action = "practice"
+            difficulty = "medium"
+            reason = f"Recent passing performance on {concept}. Continue practicing to build consistent mastery across attempts."
+        else:
+            action = "review"
+            difficulty = "easy"
+            reason = f"Low mastery detected for {concept}."
 
     elif mastery < 70:
         action = "practice"
@@ -426,9 +432,15 @@ def optimize_learning_path(
         reason = f"Partial mastery detected for {concept}."
 
     else:
-        action = "advance"
-        difficulty = "hard"
-        reason = f"Strong mastery detected for {concept}."
+        recent = weakest.get("recent_score")
+        if recent is not None and recent < 7.0:
+            action = "practice"
+            difficulty = "medium"
+            reason = f"Recent low score on {concept}. Reinforcement recommended to maintain mastery."
+        else:
+            action = "advance"
+            difficulty = "hard"
+            reason = f"Strong mastery detected for {concept}."
 
     return {
         "action": action,

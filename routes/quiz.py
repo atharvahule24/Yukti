@@ -36,6 +36,11 @@ from agents.concept_registry import (
     get_canonical_concept,
     get_canonical_concepts,
 )
+from utils.quiz_rubric import (
+    extract_question_criteria,
+    format_criteria_prompt_section,
+    calculate_and_validate_criteria_score,
+)
 
 def normalize_question(text):
     text = text.lower().strip()
@@ -1387,6 +1392,15 @@ def grade_answer():
     # 2. AI grading for non-exact answers
     generator = Generator(json_mode=True)
 
+    explicit_criteria = data.get("criteria")
+    expected_criteria = extract_question_criteria(
+        question=question,
+        sample_answer=sample_answer,
+        concept=concept,
+        explicit_criteria=explicit_criteria,
+    )
+    criteria_guidance = format_criteria_prompt_section(expected_criteria)
+
     try:
         res = generator.chain.invoke({
             "context": (
@@ -1398,7 +1412,8 @@ def grade_answer():
                 question=question,
                 sample_answer=sample_answer,
                 user_answer=user_answer,
-                canonical_concepts=canonical_concepts_for_prompt
+                canonical_concepts=canonical_concepts_for_prompt,
+                criteria_guidance=criteria_guidance,
             )
         })
 
@@ -1441,14 +1456,14 @@ def grade_answer():
             repr(res)
         )
 
-        raw_score = grading.get("score", 0)
-        try:
-            score = float(raw_score)
-        except (ValueError, TypeError):
-            match = re.search(r"(\d+(\.\d+)?)", str(raw_score))
-            score = float(match.group(1)) if match else 0.0
-            
+        score, evaluated_criteria = calculate_and_validate_criteria_score(
+            grading=grading,
+            student_answer=user_answer,
+            expected_criteria=expected_criteria,
+        )
         grading["score"] = score
+        if evaluated_criteria:
+            grading["criteria"] = evaluated_criteria
 
         # Detect misconception for incorrect answers.
         print("SCORE DEBUG:", score, "IS_REASSESSMENT:", is_reassessment)
@@ -1486,14 +1501,20 @@ def grade_answer():
                 )
             )
 
-            if (
-                concept not in correct_concepts
-                and concept not in missed_concepts
-            ):
-                if score >= 7:
-                    correct_concepts.append(concept)
-                else:
+            # Enforce consistency between score and concept lists
+            if score < 7:
+                if concept in correct_concepts:
+                    correct_concepts.remove(concept)
+                if concept not in missed_concepts:
                     missed_concepts.append(concept)
+            else:
+                if concept in missed_concepts and concept not in correct_concepts:
+                    missed_concepts.remove(concept)
+                if concept not in correct_concepts:
+                    correct_concepts.append(concept)
+
+            grading["correct_concepts"] = correct_concepts
+            grading["missed_concepts"] = missed_concepts
 
             misconception_severity = None
 
