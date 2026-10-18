@@ -576,6 +576,168 @@ class TestQuizGeminiIntegration(unittest.TestCase):
             # The returned adaptive plan's concept should have safely fallen back rather than forcing the ungrounded concept
             self.assertIsNone(data["adaptive_plan"]["concept"])
 
+    def test_quiz_submit_grades_and_persists_mcq_answers(self):
+        """Verifies POST /api/quiz/submit/<session_id> grades against authoritative stored quiz and records score."""
+        from flask import Flask
+        from routes.quiz import quiz_bp
+
+        app = Flask(__name__)
+        app.register_blueprint(quiz_bp, url_prefix="/api")
+        client = app.test_client()
+
+        session_id = "test-submit-session-001"
+        stored_quiz = {
+            "mcq": [
+                {
+                    "id": "mcq_0",
+                    "question": "What is the primary product of photosynthesis?",
+                    "options": ["Oxygen and Glucose", "Nitrogen", "Methane", "Helium"],
+                    "answer": 0,
+                    "concept": "Photosynthesis"
+                },
+                {
+                    "id": "mcq_1",
+                    "question": "Which organelle conducts photosynthesis?",
+                    "options": ["Mitochondria", "Ribosome", "Chloroplast", "Golgi"],
+                    "answer": 2,
+                    "concept": "Chloroplast"
+                }
+            ],
+            "short_answer": []
+        }
+        mock_store = {
+            session_id: {
+                "id": session_id,
+                "quiz": stored_quiz
+            }
+        }
+
+        with patch("utils.auth.get_user_id_by_token", return_value=1), \
+             patch("utils.auth.verify_session_owner", return_value=(True, 200)), \
+             patch("routes.quiz.session_store", mock_store), \
+             patch("routes.quiz.record_quiz_score") as mock_record_score, \
+             patch("routes.quiz.update_mastery_from_assessment") as mock_mastery:
+
+            # Submit 1 correct answer (mcq_0=0) and 1 incorrect answer (mcq_1=0 instead of 2)
+            res = client.post(
+                f"/api/quiz/submit/{session_id}",
+                headers={"Authorization": "Bearer test-token"},
+                json={"answers": {"mcq_0": 0, "mcq_1": 0}}
+            )
+
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertEqual(data["total_questions"], 2)
+            self.assertEqual(data["correct_count"], 1)
+            self.assertEqual(data["percentage"], 50.0)
+            self.assertEqual(data["score"], 5.0)
+            self.assertIn("details", data)
+            self.assertEqual(len(data["details"]), 2)
+
+            # Check that score was recorded in Supabase progress table
+            mock_record_score.assert_called_once_with(session_id, 5.0)
+
+            # Check that mastery updates were triggered for both concepts
+            self.assertEqual(mock_mastery.call_count, 2)
+
+            # Check that submission was persisted in session_store
+            self.assertIn("quiz_submission", mock_store[session_id])
+            self.assertEqual(mock_store[session_id]["quiz_submission"]["correct_count"], 1)
+
+    def test_quiz_submit_idempotent_duplicate_prevented(self):
+        """Verifies duplicate quiz submission returns existing result and does not increment quiz_attempts again."""
+        from flask import Flask
+        from routes.quiz import quiz_bp
+
+        app = Flask(__name__)
+        app.register_blueprint(quiz_bp, url_prefix="/api")
+        client = app.test_client()
+
+        session_id = "test-idempotent-session-002"
+        existing_submission = {
+            "score": 10.0,
+            "percentage": 100.0,
+            "correct_count": 2,
+            "total_questions": 2,
+            "answers": {"mcq_0": 0, "mcq_1": 2},
+            "submitted_at": "2026-10-17T20:00:00Z"
+        }
+        mock_store = {
+            session_id: {
+                "id": session_id,
+                "quiz": {
+                    "mcq": [{"id": "mcq_0", "answer": 0}, {"id": "mcq_1", "answer": 2}]
+                },
+                "quiz_submission": existing_submission
+            }
+        }
+
+        with patch("utils.auth.get_user_id_by_token", return_value=1), \
+             patch("utils.auth.verify_session_owner", return_value=(True, 200)), \
+             patch("routes.quiz.session_store", mock_store), \
+             patch("routes.quiz.record_quiz_score") as mock_record_score, \
+             patch("routes.quiz.update_mastery_from_assessment") as mock_mastery:
+
+            res = client.post(
+                f"/api/quiz/submit/{session_id}",
+                headers={"Authorization": "Bearer test-token"},
+                json={"answers": {"mcq_0": 0, "mcq_1": 2}}
+            )
+
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertTrue(data.get("already_submitted"))
+            self.assertEqual(data["score"], 10.0)
+
+            # Idempotency safeguard: record_quiz_score must NOT be called again
+            mock_record_score.assert_not_called()
+            mock_mastery.assert_not_called()
+
+    def test_quiz_get_restores_submission_state(self):
+        """Verifies GET /api/quiz/<session_id> restores saved submission state for page reloads."""
+        from flask import Flask
+        from routes.quiz import quiz_bp
+
+        app = Flask(__name__)
+        app.register_blueprint(quiz_bp, url_prefix="/api")
+        client = app.test_client()
+
+        session_id = "test-restore-session-003"
+        mock_submission = {
+            "score": 8.0,
+            "percentage": 80.0,
+            "correct_count": 4,
+            "total_questions": 5,
+            "answers": {"mcq_0": 0, "mcq_1": 1, "mcq_2": 2, "mcq_3": 3, "mcq_4": 0}
+        }
+        mock_store = {
+            session_id: {
+                "id": session_id,
+                "quiz": {
+                    "mcq": [{"id": f"mcq_{i}", "question": f"Q{i}", "options": ["A", "B"], "answer": 0} for i in range(5)],
+                    "short_answer": []
+                },
+                "quiz_submission": mock_submission
+            }
+        }
+
+        with patch("utils.auth.get_user_id_by_token", return_value=1), \
+             patch("utils.auth.verify_session_owner", return_value=(True, 200)), \
+             patch("routes.quiz.session_store", mock_store):
+
+            res = client.get(
+                f"/api/quiz/{session_id}",
+                headers={"Authorization": "Bearer test-token"}
+            )
+
+            self.assertEqual(res.status_code, 200)
+            data = res.get_json()
+            self.assertEqual(len(data["mcq"]), 5)
+            self.assertIn("submission", data)
+            self.assertEqual(data["submission"]["score"], 8.0)
+            self.assertEqual(data["submission"]["correct_count"], 4)
+            self.assertEqual(data["submission"]["answers"]["mcq_1"], 1)
+
 
 if __name__ == "__main__":
     unittest.main()

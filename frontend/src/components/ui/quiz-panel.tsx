@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
-import { getQuiz, generateQuiz, getFact, gradeAnswer,
+import { getQuiz, generateQuiz, getFact, gradeAnswer, submitQuiz,
 recordMetacognitiveCheckin,generateReassessment,getVideoRecommendation, isTransientNetworkError} from '../../lib/api'
-import type { GradeResult, MCQ, ShortAnswer } from '../../lib/api'
-import { Loader2, CheckCircle2, XCircle, ChevronRight, HelpCircle, MessageSquare, AlertCircle } from 'lucide-react'
+import type { GradeResult, MCQ, ShortAnswer, QuizSubmission } from '../../lib/api'
+import { Loader2, CheckCircle2, XCircle, ChevronRight, ChevronLeft, HelpCircle, MessageSquare, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
 
 export function QuizPanel({ sessionId }: { sessionId: string }) {
@@ -14,6 +14,8 @@ const isMountedRef = useRef(true)
 
 // MCQ State
 const [mcqAnswers, setMcqAnswers] = useState<Record<string, number>>({})
+const [submission, setSubmission] = useState<QuizSubmission | null>(null)
+const [submitting, setSubmitting] = useState(false)
 const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
 const [showHint, setShowHint] = useState(false)
 const [shortAnswers, setShortAnswers] = useState<Record<string, string>>({})
@@ -60,6 +62,13 @@ getQuiz(sessionId)
 .then(data => {
 setMcq(data.mcq || [])
 setSa(data.short_answer || [])
+if (data.submission) {
+setSubmission(data.submission)
+setMcqAnswers(data.submission.answers || {})
+} else {
+setSubmission(null)
+setMcqAnswers({})
+}
 setLoading(false)
 })
 .catch(() => setLoading(false))
@@ -111,6 +120,7 @@ setMcq(data.mcq || [])
 setSa(data.short_answer || [])
 setCurrentQuestionIndex(0)
 setMcqAnswers({})
+setSubmission(null)
 setShortAnswers({})
 setGradingResults({})
 setShowHint(false)
@@ -132,6 +142,26 @@ setGenerating(false)
 }
 }
 
+const handleSubmitQuiz = async () => {
+if (!sessionId || submitting || mcq.length === 0) return
+setSubmitting(true)
+try {
+const res = await submitQuiz(sessionId, mcqAnswers)
+if (isMountedRef.current) {
+setSubmission(res)
+toast.success(`Quiz submitted! Score: ${res.correct_count}/${res.total_questions} (${res.percentage}%)`)
+}
+} catch (err: any) {
+console.error('Failed to submit quiz:', err)
+const msg = err?.message || err?.error || 'Failed to submit quiz. Please try again.'
+toast.error(msg)
+} finally {
+if (isMountedRef.current) {
+setSubmitting(false)
+}
+}
+}
+
 const askDetailedExplanation = (q: MCQ) => {
 const question = `Can you give me a detailed explanation for the question: "${q.question}"?`
 window.dispatchEvent(new CustomEvent('yukti:ask', { detail: question }))
@@ -149,8 +179,10 @@ try {
 const confidenceRating = confidenceRatings[question.id]
 const result = await gradeAnswer(question.question, answer, question.sample_answer, sessionId, question.concept, confidenceRating)
 setGradingResults(prev => ({ ...prev, [question.id]: result }))
-} catch (e) {
-console.error(e)
+} catch (e: any) {
+console.error('Failed to grade short answer:', e)
+const msg = e?.message || e?.error || 'Failed to grade answer. Please try again.'
+toast.error(msg)
 } finally {
 setGradingQuestionId(null)
 }
@@ -368,13 +400,34 @@ return (
     {generating ? 'Generating...' : 'Generate New Adaptive Quiz'}
   </button>
 </div>
+
+{submission && (
+  <div className="bg-[var(--bg-surface)] border border-[var(--border)] rounded-[var(--radius-lg)] p-6 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+    <div>
+      <div className="flex items-center gap-2 mb-1">
+        <CheckCircle2 className="text-[var(--success)]" size={20} />
+        <h4 className="text-base font-semibold text-[var(--text-primary)]">Quiz Completed</h4>
+      </div>
+      <p className="text-sm text-[var(--text-secondary)]">
+        You answered <span className="font-semibold text-[var(--text-primary)]">{submission.correct_count}</span> of <span className="font-semibold text-[var(--text-primary)]">{submission.total_questions}</span> questions correctly ({submission.percentage}%).
+      </p>
+    </div>
+    <div className="flex items-center gap-3">
+      <div className="px-4 py-2 bg-[var(--bg-elevated)] border border-[var(--border)] rounded-[var(--radius)] text-center">
+        <span className="text-xs text-[var(--text-secondary)] uppercase block">Final Score</span>
+        <span className="text-xl font-bold text-[var(--accent-purple)]">{submission.correct_count}/{submission.total_questions}</span>
+      </div>
+    </div>
+  </div>
+)}
+
 <div className="flex justify-between items-center text-sm font-medium text-[var(--text-secondary)] mb-2">
 <span>Question {currentQuestionIndex + 1} of {allQuestions.length}</span>
 <span className="px-3 py-1 bg-[var(--bg-elevated)] rounded-full border border-[var(--border)]">
-Score: {Object.keys(mcqAnswers).filter(k => {
+Score: {submission ? `${submission.correct_count}/${submission.total_questions}` : `${Object.keys(mcqAnswers).filter(k => {
 const qObj = allQuestions.find(qq => qq.id === k);
 return qObj && mcqAnswers[k] === qObj.answer;
-}).length}/{allQuestions.length}
+}).length}/${allQuestions.length}`}
 </span>
 </div>
 
@@ -406,7 +459,7 @@ btnClass += "border-[var(--border)] bg-[var(--bg-base)] text-[var(--text-muted)]
 return (
 <button
 key={i}
-disabled={answered}
+disabled={answered || Boolean(submission)}
 onClick={() => setMcqAnswers(prev => ({ ...prev, [q.id]: i }))}
 className={btnClass}
 >
@@ -462,17 +515,57 @@ className="self-start mt-2 px-4 py-2 bg-[var(--bg-surface)] border border-[var(-
 )}
 </div>
 
-<div className="flex justify-end mt-4">
-<button 
-disabled={!answered || currentQuestionIndex === allQuestions.length - 1}
-onClick={() => {
-setCurrentQuestionIndex(prev => prev + 1)
-setShowHint(false)
-}}
-className="px-6 py-3 bg-[var(--accent-purple)] text-white rounded-[var(--radius)] font-bold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
->
-Next Question <ChevronRight size={18} />
-</button>
+<div className="flex justify-between items-center mt-4">
+  {currentQuestionIndex > 0 ? (
+    <button
+      onClick={() => {
+        setCurrentQuestionIndex(prev => prev - 1)
+        setShowHint(false)
+      }}
+      className="px-4 py-2.5 bg-[var(--bg-surface)] border border-[var(--border)] text-[var(--text-primary)] rounded-[var(--radius)] font-medium flex items-center gap-2 hover:bg-[var(--bg-elevated)] transition-colors"
+    >
+      <ChevronLeft size={18} /> Previous Question
+    </button>
+  ) : <div />}
+
+  {currentQuestionIndex === allQuestions.length - 1 ? (
+    submission ? (
+      <button
+        onClick={handleGenerate}
+        disabled={generating}
+        className="px-6 py-3 bg-[var(--accent-purple)] text-white rounded-[var(--radius)] font-bold flex items-center gap-2 hover:opacity-90 transition-opacity disabled:opacity-50"
+      >
+        {generating ? 'Generating...' : 'Take Another Quiz'}
+      </button>
+    ) : (
+      <button
+        disabled={!answered || submitting}
+        onClick={handleSubmitQuiz}
+        className="px-6 py-3 bg-[var(--accent-purple)] text-white rounded-[var(--radius)] font-bold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+      >
+        {submitting ? (
+          <>
+            <Loader2 className="animate-spin" size={18} /> Submitting...
+          </>
+        ) : (
+          <>
+            Submit Quiz <CheckCircle2 size={18} />
+          </>
+        )}
+      </button>
+    )
+  ) : (
+    <button
+      disabled={!answered && !submission}
+      onClick={() => {
+        setCurrentQuestionIndex(prev => prev + 1)
+        setShowHint(false)
+      }}
+      className="px-6 py-3 bg-[var(--accent-purple)] text-white rounded-[var(--radius)] font-bold flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90 transition-opacity"
+    >
+      Next Question <ChevronRight size={18} />
+    </button>
+  )}
 </div>
 
 {sa.length > 0 && (
@@ -788,8 +881,10 @@ setReassessmentAnswers((prev) => ({
 [question.id]: "",
 }))
 }
-} catch (e) {
+} catch (e: any) {
 console.error('Failed to grade reassessment:', e)
+const msg = e?.message || e?.error || 'Failed to grade reassessment. Please try again.'
+toast.error(msg)
 }
 }}
 disabled={!reassessmentAnswers[question.id]?.trim()}

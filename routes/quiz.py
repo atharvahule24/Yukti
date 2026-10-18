@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from utils.auth import require_session_owner
 from difflib import SequenceMatcher
 import re
@@ -213,10 +214,112 @@ def get_quiz(session_id):
     if session_id not in session_store:
         return jsonify({"error": "not_found"}), 404
         
-    quiz = session_store[session_id].get("quiz")
+    session_data = session_store[session_id]
+    quiz = session_data.get("quiz")
     if not quiz:
         return jsonify({"mcq": [], "short_answer": []})
-    return jsonify(quiz)
+
+    response_data = {
+        "mcq": quiz.get("mcq", []),
+        "short_answer": quiz.get("short_answer", []),
+    }
+    submission = session_data.get("quiz_submission")
+    if submission:
+        response_data["submission"] = submission
+    return jsonify(response_data)
+
+@quiz_bp.route('/quiz/submit/<session_id>', methods=['POST'])
+@require_session_owner
+def submit_quiz(session_id):
+    valid, error = validate_session_id(session_id)
+    if not valid:
+        return json_error(error)
+    if session_id not in session_store:
+        return jsonify({"error": "not_found"}), 404
+
+    session_data = session_store[session_id]
+    quiz = session_data.get("quiz")
+    if not quiz or not quiz.get("mcq"):
+        return json_error("No active quiz found for this session. Please generate a quiz first.")
+
+    existing_submission = session_data.get("quiz_submission")
+    if existing_submission:
+        return jsonify({
+            **existing_submission,
+            "already_submitted": True,
+        })
+
+    data, parse_error = parse_json_request(request)
+    if parse_error:
+        return json_error(parse_error)
+
+    answers = data.get("answers")
+    if not isinstance(answers, dict):
+        return json_error("Invalid answers format. Expected an object mapping question IDs to selected option indices.")
+
+    stored_mcqs = quiz.get("mcq", [])
+    total_questions = len(stored_mcqs)
+    correct_count = 0
+    results_detail = []
+
+    for q in stored_mcqs:
+        qid = q.get("id")
+        user_val = answers.get(qid)
+        correct_val = q.get("answer")
+        concept = q.get("concept") or "general"
+
+        is_correct = False
+        if user_val is not None:
+            try:
+                is_correct = (int(user_val) == int(correct_val))
+            except (ValueError, TypeError):
+                is_correct = False
+
+        if is_correct:
+            correct_count += 1
+
+        results_detail.append({
+            "id": qid,
+            "user_answer": user_val,
+            "correct_answer": correct_val,
+            "is_correct": is_correct,
+            "concept": concept,
+        })
+
+        try:
+            update_mastery_from_assessment(
+                session_id=session_id,
+                concept=concept,
+                score=10.0 if is_correct else 0.0,
+                correct=is_correct,
+            )
+        except Exception as mastery_err:
+            print("Quiz submit mastery update error:", repr(mastery_err))
+
+    percentage = round((correct_count / total_questions) * 100, 1) if total_questions > 0 else 0.0
+    score_10 = round((correct_count / total_questions) * 10.0, 1) if total_questions > 0 else 0.0
+
+    try:
+        record_quiz_score(session_id, score_10)
+    except Exception as score_err:
+        print("Quiz submit score recording error:", repr(score_err))
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    submission_data = {
+        "score": score_10,
+        "percentage": percentage,
+        "correct_count": correct_count,
+        "total_questions": total_questions,
+        "answers": answers,
+        "details": results_detail,
+        "submitted_at": now_iso,
+    }
+
+    session_data["quiz_submission"] = submission_data
+    session_store[session_id] = session_data
+
+    return jsonify(submission_data)
+
 
 @quiz_bp.route('/quiz/generate/<session_id>', methods=['POST'])
 @require_session_owner
@@ -1073,6 +1176,7 @@ GENERATED QUESTION:
 
         # Store the newly generated quiz as the active quiz.
         session_data["quiz"] = quiz
+        session_data.pop("quiz_submission", None)
 
         session_store[session_id] = session_data
 

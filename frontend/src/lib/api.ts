@@ -89,6 +89,23 @@ export interface ShortAnswer {
   concept: string;
 }
 
+export interface QuizSubmission {
+  score: number;
+  percentage: number;
+  correct_count: number;
+  total_questions: number;
+  answers: Record<string, number>;
+  details?: Array<{
+    id: string;
+    user_answer: number | null;
+    correct_answer: number;
+    is_correct: boolean;
+    concept: string;
+  }>;
+  submitted_at?: string;
+  already_submitted?: boolean;
+}
+
 export interface LearningPath {
   action: string;
   reason: string;
@@ -369,8 +386,17 @@ export async function rateFlashcard(cardId: string, sessionId: string, mastery: 
   return handleResponse(response);
 }
 
-export async function getQuiz(sessionId: string): Promise<{mcq: MCQ[], short_answer: ShortAnswer[]}> {
+export async function getQuiz(sessionId: string): Promise<{mcq: MCQ[], short_answer: ShortAnswer[], submission?: QuizSubmission}> {
   const response = await apiFetch(`${BASE_URL}/quiz/${sessionId}`);
+  return handleResponse(response);
+}
+
+export async function submitQuiz(sessionId: string, answers: Record<string, number>): Promise<QuizSubmission> {
+  const response = await apiFetch(`${BASE_URL}/quiz/submit/${sessionId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ answers }),
+  });
   return handleResponse(response);
 }
 
