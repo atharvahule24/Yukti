@@ -1,173 +1,111 @@
-# Contributing to Yukti
-Thanks for your interest in contributing. This guide will get you set up and making your first PR in under 15 minutes.
+# Contributing Guidelines
 
----
-
-## Table of Contents
-- [Project Overview](#project-overview)
-- [Local Setup](#local-setup)
-- [Project Structure](#project-structure)
-- [How to Contribute](#how-to-contribute)
-- [Good First Issues](#good-first-issues)
-- [PR Guidelines](#pr-guidelines)
-- [Coding Conventions](#coding-conventions)
-- [Communication](#communication)
-
----
-
-## Project Overview
-
-Yukti is an AI study companion that turns PDFs, DOCX files, TXT files, and YouTube transcripts into an interactive tutor. It uses a LangGraph RAG pipeline with FAISS vector search, streams responses via SSE, and persists all data in SQLite.
-
-**Stack:** Python, Flask, LangChain, LangGraph, FAISS, Groq, React, TypeScript, SQLite
-
----
-
-## Local Setup
-
-### Prerequisites
-- Python 3.10+
-- Node.js 20.19+ or 22.12+
-- A free [Groq API key](https://console.groq.com)
-
-### Backend
-
-```bash
-git clone https://github.com/Sudhanshukumar0007/Yukti.git
-cd Yukti
-
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-
-# Mac/Linux
-source .venv/bin/activate
-
-pip install -r requirements.txt
-
-# Windows
-copy .env.sample .env
-
-# Mac/Linux
-cp .env.sample .env
-# Edit .env and add your GROQ_API_KEY
-
-python app.py
-```
-
-Backend runs on `http://localhost:5000`
-
-### Frontend
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Frontend runs on `http://localhost:5173`
-
----
-
-## Project Structure
-
-```
-Yukti/
-├── app.py                  # Flask entry point
-├── db.py                   # SQLite persistence (sessions, SM-2, history)
-├── agents/
-│   ├── prompts.py          # LLM prompt templates per mode
-│   └── rag_workflow.py     # LangGraph RAG pipeline
-├── loaders/                # PDF, DOCX, TXT, YouTube loaders
-├── processing/             # Chunker, embedder, graph extractor
-├── retrieval/              # FAISS vector store wrapper
-├── routes/                 # Flask API blueprints
-├── llm/                    # Groq LLM wrapper
-├── utils/                  # JSON helpers
-└── frontend/
-    └── src/
-        ├── pages/          # Dashboard, StudyChat pages
-        ├── components/ui/  # Chat, flashcards, quiz, notes, graph
-        ├── hooks/          # useChat SSE hook
-        ├── lib/            # API client
-        └── styles/         # CSS design tokens
-```
-
----
+Thank you for your interest in contributing to this project! Every contribution, whether it's a bug fix, feature improvement, documentation update, or suggestion, is appreciated.
 
 ## How to Contribute
 
-1. **Find an issue** — look for issues labeled `good-first-issue`
-2. **Comment on the issue** — say you'd like to work on it so it gets assigned to you
-3. **Fork the repo** and create a branch:
-   ```bash
-   git checkout -b fix/your-issue-name
-   ```
-4. **Make your changes** — keep commits small and focused
-5. **Test your changes** — make sure the backend runs and the frontend builds
-6. **Submit a PR** — fill out the PR template completely
+### 1. Fork the Repository
 
----
+Fork this repository to your own GitHub account.
 
-## Good First Issues
+### 2. Clone Your Fork
 
-If you're new to the project, start here:
+```bash
+git clone https://github.com/YOUR_USERNAME/REPOSITORY_NAME.git
+cd REPOSITORY_NAME
+```
 
-| Label | Area | Example Tasks |
-|---|---|---|
-| `good-first-issue` + `frontend` | React/TypeScript | Add theme toggle, improve loading skeletons |
-| `good-first-issue` + `backend` | Flask/Python | Add PPTX loader, improve error messages |
-| `good-first-issue` + `documentation` | Docs | Add docstrings, improve API docs |
-| `good-first-issue` + `ai-ml` | RAG/LLM | Improve chunking strategy, add reranking |
+Replace `YOUR_USERNAME` and `REPOSITORY_NAME` with your GitHub username and repository name.
 
----
+### 3. Create a Branch
 
-## PR Guidelines
+Create a separate branch for your changes.
 
-- **One PR per issue** — don't bundle multiple unrelated changes
-- **Fill out the PR template** — incomplete PRs will be asked to resubmit
-- **Keep PRs small** — under 300 lines of change is ideal
-- **No breaking changes** without discussion in the issue first
+```bash
+git checkout -b feature/your-feature-name
+```
 
-- **Backend changes** — make sure `python app.py` still runs without errors
-- **Frontend changes** — make sure `npm run build` passes without errors
-- **Don't commit** `.env`, `vector_store/`, `uploads/`, `*.db` files — these are gitignored for a reason
+For bug fixes, you can use:
 
----
+```bash
+git checkout -b fix/your-bug-name
+```
 
-## Coding Conventions
+### 4. Make Your Changes
 
-### Python
-- Use Python 3.10+ syntax
-- Use the existing Python 3.10 typing style (`dict[str, Any]`, `X | None`, etc.)
-- Add docstrings to any new function you write
-- Keep route handlers thin — business logic goes in the relevant module
-- Follow existing patterns in `routes/` for new endpoints
+- Follow the existing project structure and coding style.
+- Keep changes focused and easy to review.
+- Add or update documentation when necessary.
+- Avoid committing API keys, passwords, or other sensitive information.
 
-### TypeScript / React
-- Use functional components with hooks only
-- Prefer CSS variables from `frontend/src/styles/tokens.css` for reusable colors; keep one-off hardcoded values scoped and consistent with the current design system
-- Avoid adding new blur-heavy or glassmorphism effects unless the surrounding component already uses that visual style
-- Keep components under 200 lines — split if larger
-- Use `frontend/src/lib/api.ts` for backend calls shared by multiple components
+### 5. Test Your Changes
 
-### Git
-- Branch naming: `fix/issue-name`, `feat/feature-name`, `docs/what-you-documented`
-- Commit messages: `fix: correct flashcard SM-2 interval calculation` not `fixed stuff`
+Run the relevant tests and verify that your changes do not break existing functionality.
 
----
+If automated tests are unavailable, perform appropriate manual testing.
 
-## Communication
+### 6. Commit Your Changes
 
-- **GitHub Issues** — for bug reports, feature requests, and task discussion
-- **GitHub Discussions** — for questions about the codebase or architecture
-- **Discord** — `sudhanshu_007_87493` for quick questions
+Use clear and descriptive commit messages.
 
-PR reviews will happen within **24-48 hours**. If you haven't heard back in 48 hours, ping in the issue thread.
+```bash
+git add .
+git commit -m "feat: add your feature"
+```
 
----
+Example commit messages:
 
-## First time contributing to open source?
+- `feat: add personalized learning recommendations`
+- `fix: resolve quiz generation issue`
+- `docs: update installation instructions`
 
-That's completely fine. Read [How to make your first open source contribution](https://opensource.guide/how-to-contribute/) and feel free to ask questions in GitHub Discussions. Everyone starts somewhere.
+### 7. Push Your Branch
+
+```bash
+git push origin feature/your-feature-name
+```
+
+### 8. Open a Pull Request
+
+Open a pull request against the original repository's default branch.
+
+In your pull request, explain:
+
+- What changes you made.
+- Why the changes are needed.
+- How you tested them.
+- Any relevant screenshots or additional information.
+
+Wait for review and address any requested changes.
+
+## Reporting Bugs
+
+When reporting a bug, please include:
+
+- A clear description of the issue.
+- Steps to reproduce it.
+- Expected behavior and actual behavior.
+- Relevant error messages or screenshots.
+- Your environment details, when relevant.
+
+Please avoid including API keys, passwords, or private user data.
+
+## Suggesting Features
+
+Feature suggestions are welcome. Explain the problem you want to solve, the proposed solution, and how it would benefit users.
+
+For significant changes, open an issue for discussion before starting implementation.
+
+## Coding Guidelines
+
+- Write readable, maintainable code.
+- Use meaningful variable and function names.
+- Keep functions focused on a single responsibility where practical.
+- Update tests and documentation when relevant.
+- Follow the conventions already used in the repository.
+
+## Community Guidelines
+
+All contributors are expected to follow the project's Code of Conduct.
+
+Thank you for helping improve this project!
