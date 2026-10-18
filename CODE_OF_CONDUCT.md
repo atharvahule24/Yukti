@@ -2,40 +2,40 @@
 
 ## Our Pledge
 
-We as contributors and maintainers of Yukti pledge to make participation in our project a harassment-free experience for everyone, regardless of age, body size, disability, ethnicity, gender identity, level of experience, nationality, personal appearance, race, religion, or sexual identity and orientation.
+We are committed to providing a welcoming, respectful, and inclusive environment for everyone who contributes to this project, regardless of experience level, background, identity, or technical expertise.
 
 ## Our Standards
 
-**Positive behavior includes:**
-- Being respectful and welcoming to contributors of all skill levels
-- Giving constructive, specific feedback on PRs — not just "this is wrong"
-- Accepting feedback gracefully and using it to improve
-- Helping new contributors understand the codebase
-- Focusing on what is best for the project and the community
+Examples of positive behavior include:
 
-**Unacceptable behavior includes:**
-- Harassment, insults, or derogatory comments
-- Personal or political attacks
-- Publishing others' private information without permission
-- Dismissing contributions because someone is a beginner
-- Any conduct that would be considered inappropriate in a professional setting
+- Being respectful, constructive, and considerate.
+- Welcoming different perspectives and experiences.
+- Giving and accepting constructive feedback gracefully.
+- Focusing on what is best for the project and its community.
+- Helping newcomers learn and contribute.
 
-## Maintainer Responsibilities
+Unacceptable behavior includes:
 
-The project maintainer will:
-- Review PRs within 48 hours and provide specific feedback
-- Clearly label issues so contributors know what to work on
-- Enforce this Code of Conduct fairly and consistently
-- Remove, edit, or reject contributions that violate these standards
+- Harassment, discrimination, or personal attacks.
+- Trolling, insulting, or derogatory comments.
+- Publishing private information without permission.
+- Any conduct that creates an unsafe or hostile environment.
 
-## Scope
+## Our Responsibilities
 
-This Code of Conduct applies in all project spaces — GitHub Issues, Pull Requests, Discussions, and any other communication channel associated with Yukti.
+Project maintainers are responsible for clarifying and enforcing our standards of acceptable behavior and may take appropriate corrective action in response to unacceptable conduct.
 
 ## Enforcement
 
-Instances of unacceptable behavior may be reported by contacting the maintainer at **sudhanshu.kumar.aidev007@gmail.com**. All complaints will be reviewed and investigated promptly.
+Instances of abusive, harassing, or otherwise unacceptable behavior may be reported to the project maintainers through the repository's GitHub contact channels.
+
+All reports will be reviewed fairly and handled with appropriate discretion.
+
+## Scope
+
+This Code of Conduct applies to all project spaces, including issues, pull requests, discussions, and other community interactions related to the project.
 
 ## Attribution
 
-This Code of Conduct is adapted from the [Contributor Covenant](https://www.contributor-covenant.org), version 2.1.
+This Code of Conduct is inspired by the Contributor Covenant.
+
